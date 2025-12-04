@@ -3,8 +3,9 @@ from typing import Sequence
 import numpy as np
 from scipy.optimize import curve_fit
 
-from Lab_apps._base.functions import gaussian
-from Lab_apps._base.models import GaussianFitResult
+from base_lib.functions import gaussian
+from base_lib.models import GaussianFitResult
+
 
 
 def fit_gaussian(x: Sequence[float], y: Sequence[float]) -> GaussianFitResult:

@@ -3,10 +3,10 @@ from dataclasses import dataclass
 from enum import Enum
 from math import hypot
 from pathlib import Path
-from typing import Generic, Optional, Protocol, Self, TypeVar
+from typing import Generic, Optional, Protocol, TypeVar, Self
+from base_lib.functions import gaussian
 import numpy as np
 
-from Lab_apps._base.functions import gaussian
 
 
 class Prefix(float, Enum):

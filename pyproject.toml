@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "base-lib"
+version = "0.1.0"
+description = "Common base library for my Python projects"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [
+  { name = "Your Name" }
+]
+
+# keep it simple: just use numpy without strict version pinning for now
+dependencies = [
+  "numpy"
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["BASE_LIB"]
