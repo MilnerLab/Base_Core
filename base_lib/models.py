@@ -2,6 +2,7 @@
 from dataclasses import dataclass
 from enum import Enum
 from math import hypot
+import math
 from pathlib import Path
 from typing import Generic, Optional, Protocol, TypeVar, Self
 from base_lib.functions import gaussian
@@ -86,15 +87,22 @@ class Frequency(float):
 class Angle(float):
     def __new__(cls, value: float, unit: AngleUnit = AngleUnit.RAD):
         radians = float(value) * unit.value
+        radians = cls._wrap_to_minus_pi_pi(radians)
         return super().__new__(cls, radians)
+
+    @staticmethod
+    def _wrap_to_minus_pi_pi(rad: float) -> float:
+        two_pi = 2 * math.pi
+        return (rad + math.pi) % two_pi - math.pi
 
     @property
     def Rad(self) -> float:
-        return float(self)               
+        return float(self)
 
     @property
     def Deg(self) -> float:
         return float(self) / AngleUnit.DEG.value
+
 
 
 
