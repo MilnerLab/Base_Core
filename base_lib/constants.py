@@ -1,0 +1,1 @@
+SPEED_OF_LIGHT = float(299_792_458)
