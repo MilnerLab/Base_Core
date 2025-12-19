@@ -1,0 +1,2 @@
+class ModuleError(RuntimeError):
+    pass
