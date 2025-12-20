@@ -1,5 +1,5 @@
 
-from base_lib.quantities.enums import Prefix
+from base_core.quantities.enums import Prefix
 
 
 class Length(float):

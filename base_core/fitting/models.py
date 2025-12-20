@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from base_lib.math.functions import gaussian
+from base_core.math.functions import gaussian
 import numpy as np
 
 

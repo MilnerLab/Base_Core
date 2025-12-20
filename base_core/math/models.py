@@ -3,7 +3,7 @@ import math
 from typing import Generic, Optional, Protocol, Self, TypeVar
 import numpy as np
 
-from base_lib.math.enums import AngleUnit
+from base_core.math.enums import AngleUnit
 
 
 class Angle(float):

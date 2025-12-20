@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 from typing import Sequence
-from base_lib.fitting.models import GaussianFitResult
+from base_core.fitting.models import GaussianFitResult
 import numpy as np
 from scipy.optimize import curve_fit
 
-from base_lib.math.functions import gaussian
+from base_core.math.functions import gaussian
 
 
 def fit_gaussian(x: Sequence[float], y: Sequence[float]) -> GaussianFitResult:
