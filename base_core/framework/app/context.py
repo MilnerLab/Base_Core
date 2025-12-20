@@ -5,9 +5,9 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 import logging
 
-from base_lib.framework.app.dispatcher import UiDispatcher
-from base_lib.framework.app.lifecycle import Lifecycle
-from base_lib.framework.events.event_bus import EventBus
+from base_core.framework.app.dispatcher import UiDispatcher
+from base_core.framework.app.lifecycle import Lifecycle
+from base_core.framework.events.event_bus import EventBus
 
 
 

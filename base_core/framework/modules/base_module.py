@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Sequence
 
-from base_lib.framework.app.context import AppContext
-from base_lib.framework.di.container import Container
+from base_core.framework.app.context import AppContext
+from base_core.framework.di.container import Container
 
 
 class BaseModule(ABC):

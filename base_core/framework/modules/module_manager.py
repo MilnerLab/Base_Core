@@ -1,10 +1,10 @@
 from dataclasses import dataclass
 from typing import Mapping, Sequence
 
-from base_lib.framework.app.context import AppContext
-from base_lib.framework.di.container import Container
-from base_lib.framework.modules.base_module import BaseModule
-from base_lib.framework.modules.error import ModuleError
+from base_core.framework.app.context import AppContext
+from base_core.framework.di.container import Container
+from base_core.framework.modules.base_module import BaseModule
+from base_core.framework.modules.error import ModuleError
 
 
 @dataclass

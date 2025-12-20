@@ -6,8 +6,8 @@ from typing import Callable, Hashable, Iterable, Optional
 
 from concurrent.futures import Future, ThreadPoolExecutor
 
-from base_lib.framework.app.dispatcher import UiPost
-from base_lib.framework.concurrency.interfaces import T, ITaskRunner
+from base_core.framework.app.dispatcher import UiPost
+from base_core.framework.concurrency.interfaces import T, ITaskRunner
 
 
 @dataclass
