@@ -24,5 +24,5 @@ class AppContext:
 
     config: dict
     log: logging.Logger
-    events: EventBus
+    event_bus: EventBus
     lifecycle: Lifecycle

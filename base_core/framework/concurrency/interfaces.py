@@ -4,7 +4,8 @@ from concurrent.futures import Future
 import threading
 from typing import Callable, Hashable, Iterable, Optional, Protocol, TypeVar
 
-from base_core.framework.concurrency.task_runner import StreamHandle
+from base_core.framework.concurrency.models import StreamHandle
+
 
 T = TypeVar("T")
 

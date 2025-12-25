@@ -7,23 +7,14 @@ from typing import Callable, Hashable, Iterable, Optional
 
 from concurrent.futures import Future, ThreadPoolExecutor
 
+from base_core.framework.concurrency.models import StreamHandle
 from base_core.framework.concurrency.interfaces import T, ITaskRunner
-
 
 @dataclass
 class _Entry:
     token: int
     future: Future
     stop_event: Optional[threading.Event] = None
-
-
-@dataclass(frozen=True)
-class StreamHandle:
-    stop_event: threading.Event
-    future: Future[None]
-
-    def stop(self) -> None:
-        self.stop_event.set()
 
 
 class TaskRunner(ITaskRunner):
