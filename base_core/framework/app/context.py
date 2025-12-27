@@ -5,8 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Optional
 import logging
 
-from base_core.framework.app.dispatcher import UiDispatcher
-from base_core.framework.app.lifecycle import Lifecycle
+from base_core.framework.lifecycle.cleanup_collection import CleanupCollection
 from base_core.framework.events.event_bus import EventBus
 
 
@@ -25,4 +24,4 @@ class AppContext:
     config: dict
     log: logging.Logger
     event_bus: EventBus
-    lifecycle: Lifecycle
+    lifecycle: CleanupCollection
