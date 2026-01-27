@@ -12,6 +12,8 @@ def gaussian(x: Sequence[float], A, x0, sigma, offset):
     
     return A * np.exp(-((xs - x0) ** 2) / (2 * sigma ** 2)) + offset
 
+#def erfc(x: Sequence[float], sigma, )
+
 def usCFG_projection(
     wavelengths: Sequence[float],
     carrier_wavelength: float,

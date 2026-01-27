@@ -7,6 +7,8 @@ from scipy.optimize import curve_fit
 from base_core.math.functions import gaussian
 
 
+#def fit_erfc(x: Sequence[float], y: Sequence[float]) -> 
+
 def fit_gaussian(x: Sequence[float], y: Sequence[float]) -> GaussianFitResult:
     """
     Fit a Gaussian to data (x, y) and return parameters + 1σ errors.
