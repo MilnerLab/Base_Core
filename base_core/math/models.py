@@ -27,7 +27,7 @@ class Angle(float):
         return float(self) / AngleUnit.DEG.value
 
 
-@dataclass(frozen=True)
+@dataclass(slots=True)
 class Point:
     x: float
     y: float
@@ -36,36 +36,29 @@ class Point:
         return math.hypot(self.x, self.y)
 
     def subtract(self, point: "Point") -> None:
-        self._set_x(self.x - point.x)
-        self._set_y(self.y - point.y)
+        self.x -= point.x
+        self.y -= point.y
 
-    def rotate(self, angle: Angle, center: Optional["Point"] = None) -> None:
-       
-        if center is None:
-            center = Point(0.0, 0.0)
+    def affine_transform(self, transform_parameter: float) -> None:
+        self.x *= transform_parameter
 
-        cx, cy = center.x, center.y
+    # Low-level: rotate with precomputed cos/sin (fast in loops)
+    def rotate_cs(self, cos_a: float, sin_a: float, center: Optional["Point"] = None) -> None:
+        cx = center.x if center is not None else 0.0
+        cy = center.y if center is not None else 0.0
 
         tx = self.x - cx
         ty = self.y - cy
 
-        cos_a = np.cos(angle.Rad)
-        sin_a = np.sin(angle.Rad)
+        self.x = tx * cos_a - ty * sin_a + cx
+        self.y = tx * sin_a + ty * cos_a + cy
 
-        rx = tx * cos_a - ty * sin_a
-        ry = tx * sin_a + ty * cos_a
+    # Convenience wrapper (but slower if called for every point)
+    def rotate(self, angle, center: Optional["Point"] = None) -> None:
+        c = math.cos(angle.Rad)
+        s = math.sin(angle.Rad)
+        self.rotate_cs(c, s, center)
 
-        self._set_x(rx + cx)
-        self._set_y(ry + cy)
-    
-    def affine_transform(self, transform_parameter: float) -> None:
-        self._set_x(transform_parameter * self.x)
-
-    def _set_x(self, value: float) -> None:
-        object.__setattr__(self, "x", value)
-    
-    def _set_y(self, value: float) -> None:
-        object.__setattr__(self, "y", value)
         
         
 class SupportsOrdering(Protocol):
