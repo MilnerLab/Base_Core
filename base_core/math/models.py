@@ -1,13 +1,22 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 import math
 from typing import Generic, Optional, Protocol, Self, TypeVar
 import numpy as np
+from base_core.framework.serialization.serde import PrimitiveSerde, Primitive
 
 from base_core.math.enums import AngleUnit
 
+class Angle(float, PrimitiveSerde):
+    """
+    Float subclass storing the value internally in radians.
+    Primitive representation: a single float (radians).
+    """
 
-class Angle(float):
     def __new__(cls, value: float, unit: AngleUnit = AngleUnit.RAD, wrap: bool = True):
+        # In your real code, set default unit=AngleUnit.RAD directly.
+        if unit is None:
+            raise ValueError("AngleUnit must be provided (use AngleUnit.RAD as default in real code)")
+
         radians = float(value) * unit.value
         if wrap:
             radians = cls._wrap_to_minus_pi_pi(radians)
@@ -26,9 +35,23 @@ class Angle(float):
     def Deg(self) -> float:
         return float(self) / AngleUnit.DEG.value
 
+    # --- serialization ---
+    def to_primitive(self) -> float:
+        return float(self)
+
+    @classmethod
+    def from_primitive(cls, v: Primitive) -> "Angle":
+        # Stored value is radians; avoid wrapping to preserve exact stored value.
+        return cls(float(v), unit=AngleUnit.RAD, wrap=False)
+
 
 @dataclass(slots=True)
-class Point:
+class Point(PrimitiveSerde):
+    """
+    Simple 2D point.
+    Primitive representation uses dataclass field names automatically.
+    """
+
     x: float
     y: float
 
@@ -42,7 +65,6 @@ class Point:
     def affine_transform(self, transform_parameter: float) -> None:
         self.x *= transform_parameter
 
-    # Low-level: rotate with precomputed cos/sin (fast in loops)
     def rotate_cs(self, cos_a: float, sin_a: float, center: Optional["Point"] = None) -> None:
         cx = center.x if center is not None else 0.0
         cy = center.y if center is not None else 0.0
@@ -53,24 +75,38 @@ class Point:
         self.x = tx * cos_a - ty * sin_a + cx
         self.y = tx * sin_a + ty * cos_a + cy
 
-    # Convenience wrapper (but slower if called for every point)
-    def rotate(self, angle, center: Optional["Point"] = None) -> None:
+    def rotate(self, angle: Angle, center: Optional["Point"] = None) -> None:
         c = math.cos(angle.Rad)
         s = math.sin(angle.Rad)
         self.rotate_cs(c, s, center)
 
-        
-        
+    # --- serialization (no hardcoded "x"/"y") ---
+    def to_primitive(self) -> dict[str, float]:
+        return {f.name: float(getattr(self, f.name)) for f in fields(self)}
+
+    @classmethod
+    def from_primitive(cls, v: Primitive) -> "Point":
+        return cls(**{f.name: float(v[f.name]) for f in fields(cls)})
+
+
 class SupportsOrdering(Protocol):
     def __lt__(self, other: Self, /) -> bool: ...
     def __le__(self, other: Self, /) -> bool: ...
     def __gt__(self, other: Self, /) -> bool: ...
     def __ge__(self, other: Self, /) -> bool: ...
 
+
 T = TypeVar("T", bound=SupportsOrdering)
 
+
 @dataclass(frozen=True)
-class Range(Generic[T]):
+class Range(Generic[T], PrimitiveSerde):
+    """
+    Generic range type.
+    Primitive representation uses dataclass field names automatically
+    (no hardcoded "min"/"max").
+    """
+
     min: T
     max: T
 
@@ -79,10 +115,15 @@ class Range(Generic[T]):
             raise ValueError("min cannot be greater than max")
 
     def is_in_range(self, value: T, *, inclusive: bool = True) -> bool:
-        if inclusive:
-            return self.min <= value <= self.max
-        else:
-            return self.min < value < self.max
+        return (self.min <= value <= self.max) if inclusive else (self.min < value < self.max)
+
+    # --- serialization (no hardcoded "min"/"max") ---
+    def to_primitive(self) -> dict[str, Primitive]:
+        return {f.name: getattr(self, f.name) for f in fields(self)}
+
+    @classmethod
+    def from_primitive(cls, v: Primitive) -> "Range":
+        return cls(**{f.name: v[f.name] for f in fields(cls)})
         
 @dataclass(frozen=True)
 class Histogram2D():
