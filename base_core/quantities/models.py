@@ -164,6 +164,29 @@ class Mass(float, PrimitiveSerde):
     def from_primitive(cls, v: Primitive) -> "Mass":
         return cls(float(v))  # interpret as kg
 
+class Area(float, PrimitiveSerde):
+    """
+    Generic area.
+    Internal unit: m^2.
+
+    Prefix is relative to meters (squared):
+      - Area(1.0, Prefix.CENTI) == 1 cm^2
+    """
+    def __new__(cls, value: float, prefix: Prefix = Prefix.NONE):
+        m2 = float(value) * (prefix.value ** 2)
+        if m2 < 0:
+            raise ValueError("Area cannot be negative.")
+        return super().__new__(cls, m2)
+
+    def value(self, prefix: Prefix = Prefix.NONE) -> float:
+        return float(self) / (prefix.value ** 2)
+
+    def to_primitive(self) -> float:
+        return float(self)  # m^2
+
+    @classmethod
+    def from_primitive(cls, v: Primitive) -> "Area":
+        return cls(float(v))  # interpret as m^2
 
 class Volume(float, PrimitiveSerde):
     """
@@ -215,3 +238,24 @@ class Pressure(float, PrimitiveSerde):
     @classmethod
     def from_primitive(cls, v: Primitive) -> "Pressure":
         return cls(float(v), unit=PressureUnit.PA)  # interpret as Pa
+    
+class Power(float, PrimitiveSerde):
+    """
+    Generic power.
+    Internal unit: W.
+    """
+    def __new__(cls, value: float, prefix: Prefix = Prefix.NONE):
+        w = float(value) * prefix.value
+        if w < 0:
+            raise ValueError("Power cannot be negative.")
+        return super().__new__(cls, w)
+
+    def value(self, prefix: Prefix = Prefix.NONE) -> float:
+        return float(self) / prefix.value
+
+    def to_primitive(self) -> float:
+        return float(self)  # W
+
+    @classmethod
+    def from_primitive(cls, v: Primitive) -> "Power":
+        return cls(float(v))  # interpret as W

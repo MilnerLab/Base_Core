@@ -7,7 +7,7 @@ from typing import Any, Mapping, Optional
 from base_core.quantities.enums import Prefix
 from base_core.quantities.constants import SPEED_OF_LIGHT
 
-from base_core.quantities.specific_models import AtomicMass, PolarizabilityVolume
+from base_core.quantities.specific_models import AtomicMass, Intensity, PolarizabilityVolume
 from models import (
     Frequency,
     InverseLength,
@@ -48,7 +48,7 @@ class Spinnability:
     """
     sigma: float
     temperature: Optional[Temperature] = None
-    intensity_W_cm2: Optional[float] = None
+    intensity: Optional[Intensity] = None
     reference: str = ""
     notes: str = ""
 
