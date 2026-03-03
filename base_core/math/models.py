@@ -11,6 +11,15 @@ from base_core.math.enums import AngleUnit
 
 FloatArray = npt.NDArray[np.float64]
 
+class SupportsOrdering(Protocol):
+    def __lt__(self, other: Self, /) -> bool: ...
+    def __le__(self, other: Self, /) -> bool: ...
+    def __gt__(self, other: Self, /) -> bool: ...
+    def __ge__(self, other: Self, /) -> bool: ...
+
+
+T = TypeVar("T", bound=SupportsOrdering)
+
 class Angle(float, PrimitiveSerde):
     """
     Float subclass storing the value internally in radians.
@@ -49,6 +58,31 @@ class Angle(float, PrimitiveSerde):
         # Stored value is radians; avoid wrapping to preserve exact stored value.
         return cls(float(v), unit=AngleUnit.RAD, wrap=False)
 
+@dataclass(frozen=True)
+class Range(Generic[T], PrimitiveSerde):
+    """
+    Generic range type.
+    Primitive representation uses dataclass field names automatically
+    (no hardcoded "min"/"max").
+    """
+
+    min: T
+    max: T
+
+    def __post_init__(self):
+        if self.min > self.max:
+            raise ValueError("min cannot be greater than max")
+
+    def is_in_range(self, value: T, *, inclusive: bool = True) -> bool:
+        return (self.min <= value <= self.max) if inclusive else (self.min < value < self.max)
+
+    # --- serialization (no hardcoded "min"/"max") ---
+    def to_primitive(self) -> dict[str, Primitive]:
+        return {f.name: getattr(self, f.name) for f in fields(self)}
+
+    @classmethod
+    def from_primitive(cls, v: Primitive) -> "Range":
+        return cls(**{f.name: v[f.name] for f in fields(cls)})
 
 @dataclass(slots=True)
 class Point(PrimitiveSerde):
@@ -156,41 +190,6 @@ class Points:
             m = (d > float(r.min)) & (d < float(r.max))
         return Points(self.x[m], self.y[m])
 
-class SupportsOrdering(Protocol):
-    def __lt__(self, other: Self, /) -> bool: ...
-    def __le__(self, other: Self, /) -> bool: ...
-    def __gt__(self, other: Self, /) -> bool: ...
-    def __ge__(self, other: Self, /) -> bool: ...
-
-
-T = TypeVar("T", bound=SupportsOrdering)
-
-
-@dataclass(frozen=True)
-class Range(Generic[T], PrimitiveSerde):
-    """
-    Generic range type.
-    Primitive representation uses dataclass field names automatically
-    (no hardcoded "min"/"max").
-    """
-
-    min: T
-    max: T
-
-    def __post_init__(self):
-        if self.min > self.max:
-            raise ValueError("min cannot be greater than max")
-
-    def is_in_range(self, value: T, *, inclusive: bool = True) -> bool:
-        return (self.min <= value <= self.max) if inclusive else (self.min < value < self.max)
-
-    # --- serialization (no hardcoded "min"/"max") ---
-    def to_primitive(self) -> dict[str, Primitive]:
-        return {f.name: getattr(self, f.name) for f in fields(self)}
-
-    @classmethod
-    def from_primitive(cls, v: Primitive) -> "Range":
-        return cls(**{f.name: v[f.name] for f in fields(cls)})
         
 @dataclass(frozen=True)
 class Histogram2D():
