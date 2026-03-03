@@ -1,10 +1,15 @@
+from __future__ import annotations
 from dataclasses import dataclass, fields
 import math
-from typing import Generic, Optional, Protocol, Self, TypeVar
+
 import numpy as np
+import numpy.typing as npt
+from typing import Generic, Optional, Protocol, Self, TypeVar
 from base_core.framework.serialization.serde import PrimitiveSerde, Primitive
 
 from base_core.math.enums import AngleUnit
+
+FloatArray = npt.NDArray[np.float64]
 
 class Angle(float, PrimitiveSerde):
     """
@@ -48,39 +53,23 @@ class Angle(float, PrimitiveSerde):
 @dataclass(slots=True)
 class Point(PrimitiveSerde):
     """
-    Simple 2D point.
-    Primitive representation uses dataclass field names automatically.
+    Minimal 2D point.
+
+    Intended role:
+      - small/occasional object (config values, single centers, UI/debug)
+      - heavy / bulk point processing should use `Points` (numpy arrays)
     """
 
     x: float
     y: float
 
-    def distance_from_center(self) -> float:
-        return math.hypot(self.x, self.y)
-
+    # Keep only what you actually use on single points.
     def subtract(self, point: "Point") -> None:
-        self.x -= point.x
-        self.y -= point.y
+        """In-place translation by subtracting another point."""
+        self.x -= float(point.x)
+        self.y -= float(point.y)
 
-    def affine_transform(self, transform_parameter: float) -> None:
-        self.x *= transform_parameter
-
-    def rotate_cs(self, cos_a: float, sin_a: float, center: Optional["Point"] = None) -> None:
-        cx = center.x if center is not None else 0.0
-        cy = center.y if center is not None else 0.0
-
-        tx = self.x - cx
-        ty = self.y - cy
-
-        self.x = tx * cos_a - ty * sin_a + cx
-        self.y = tx * sin_a + ty * cos_a + cy
-
-    def rotate(self, angle: Angle, center: Optional["Point"] = None) -> None:
-        c = math.cos(angle.Rad)
-        s = math.sin(angle.Rad)
-        self.rotate_cs(c, s, center)
-
-    # --- serialization (no hardcoded "x"/"y") ---
+    # --- serialization ---
     def to_primitive(self) -> dict[str, float]:
         return {f.name: float(getattr(self, f.name)) for f in fields(self)}
 
@@ -88,6 +77,84 @@ class Point(PrimitiveSerde):
     def from_primitive(cls, v: Primitive) -> "Point":
         return cls(**{f.name: float(v[f.name]) for f in fields(cls)})
 
+
+@dataclass(slots=True)
+class Points:
+    """
+    Fast container for many 2D points (Structure-of-Arrays):
+      - x: 1D numpy array of x coordinates
+      - y: 1D numpy array of y coordinates
+    """
+
+    x: FloatArray
+    y: FloatArray
+
+    def __post_init__(self) -> None:
+        self.x = np.asarray(self.x, dtype=np.float64)
+        self.y = np.asarray(self.y, dtype=np.float64)
+
+        if self.x.ndim != 1 or self.y.ndim != 1:
+            raise ValueError("x and y must be 1D arrays")
+        if self.x.shape != self.y.shape:
+            raise ValueError("x and y must have the same shape")
+
+        if not self.x.flags["C_CONTIGUOUS"]:
+            self.x = np.ascontiguousarray(self.x)
+        if not self.y.flags["C_CONTIGUOUS"]:
+            self.y = np.ascontiguousarray(self.y)
+
+    def __len__(self) -> int:
+        return int(self.x.size)
+
+    @classmethod
+    def from_xy(cls, x, y) -> "Points":
+        """Build Points from any array-like x/y inputs."""
+        return cls(np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64))
+
+    @classmethod
+    def from_pointlist(cls, pts: list["Point"]) -> "Points":
+        """Helper for migration: list[Point] -> Points (still O(N) Python iteration)."""
+        n = len(pts)
+        x = np.fromiter((p.x for p in pts), dtype=np.float64, count=n)
+        y = np.fromiter((p.y for p in pts), dtype=np.float64, count=n)
+        return cls(x, y)
+
+    def to_pointlist(self) -> list["Point"]:
+        """Expensive: creates N Python objects. Use only if really needed."""
+        return [Point(float(x), float(y)) for x, y in zip(self.x, self.y, strict=True)]
+
+    # -------- vectorized ops (in-place) --------
+    def subtract(self, p: "Point") -> None:
+        self.x -= float(p.x)
+        self.y -= float(p.y)
+
+    def affine_transform(self, transform_parameter: float) -> None:
+        self.x *= float(transform_parameter)
+
+    def rotate(self, angle: "Angle", center: Optional["Point"] = None) -> None:
+        c = math.cos(angle.Rad)
+        s = math.sin(angle.Rad)
+
+        cx = 0.0 if center is None else float(center.x)
+        cy = 0.0 if center is None else float(center.y)
+
+        tx = self.x - cx
+        ty = self.y - cy
+
+        self.x = tx * c - ty * s + cx
+        self.y = tx * s + ty * c + cy
+
+    def distance_from_center(self) -> FloatArray:
+        return np.hypot(self.x, self.y)
+
+    def filter_by_distance_range(self, r: "Range[float]", *, inclusive: bool = True) -> "Points":
+        """Return NEW Points containing only points with radius in r."""
+        d = np.hypot(self.x, self.y)
+        if inclusive:
+            m = (d >= float(r.min)) & (d <= float(r.max))
+        else:
+            m = (d > float(r.min)) & (d < float(r.max))
+        return Points(self.x[m], self.y[m])
 
 class SupportsOrdering(Protocol):
     def __lt__(self, other: Self, /) -> bool: ...
