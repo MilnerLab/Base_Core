@@ -19,3 +19,18 @@ class TemperatureUnit(Enum):
     K = "K"
     C = "C"
     F = "F"
+    
+
+class PressureUnit(Enum):
+    """Conversion factor to Pascal (Pa)."""
+    PA   = 1.0
+    BAR  = 1e5
+    ATM  = 101_325.0
+
+    # vacuum / metrology
+    TORR = 101_325.0 / 760.0          # = 133.32236842105263... Pa (exact via atm/760)
+    MMHG = 133.322387415              # conventional mmHg (very close to Torr)
+
+    # imperial
+    PSI  = 6_894.757293168
+    INHG = 133.322387415 * 25.4       # = 3386.388640341 Pa (from mmHg)

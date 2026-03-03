@@ -2,7 +2,7 @@
 import numpy as np
 
 from base_core.quantities.constants import SPEED_OF_LIGHT
-from base_core.quantities.enums import Prefix, TemperatureUnit
+from base_core.quantities.enums import Prefix, PressureUnit, TemperatureUnit
 from base_core.framework.serialization.serde import PrimitiveSerde, Primitive
 
 
@@ -186,4 +186,32 @@ class Volume(float, PrimitiveSerde):
     @classmethod
     def from_primitive(cls, v: Primitive) -> "Volume":
         return cls(float(v))  # interpret as m^3
-    
+
+
+class Pressure(float, PrimitiveSerde):
+    """
+    Generic pressure.
+    Internal unit: Pa.
+    """
+    def __new__(
+        cls,
+        value: float,
+        unit: PressureUnit = PressureUnit.PA,
+        prefix: Prefix = Prefix.NONE,
+    ):
+        pa = float(value) * prefix.value * float(unit.value)
+        return super().__new__(cls, pa)
+
+    def value(
+        self,
+        unit: PressureUnit = PressureUnit.PA,
+        prefix: Prefix = Prefix.NONE,
+    ) -> float:
+        return float(self) / (float(unit.value) * prefix.value)
+
+    def to_primitive(self) -> float:
+        return float(self)  # Pa
+
+    @classmethod
+    def from_primitive(cls, v: Primitive) -> "Pressure":
+        return cls(float(v), unit=PressureUnit.PA)  # interpret as Pa
