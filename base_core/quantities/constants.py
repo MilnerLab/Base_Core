@@ -1,7 +1,7 @@
 import math
 
 # --- Defining (exact) SI constants ---
-SPEED_OF_LIGHT_M_S = float(299_792_458)     # c, speed of light [m/s] (exact)
+SPEED_OF_LIGHT = float(299_792_458)     # c, speed of light [m/s] (exact)
 PLANCK_H_J_S = 6.626_070_15e-34             # h, Planck constant [J*s] (exact)
 ELEMENTARY_CHARGE_C = 1.602_176_634e-19     # e, elementary charge [C] (exact)
 BOLTZMANN_J_K = 1.380_649e-23               # k_B, Boltzmann constant [J/K] (exact)
