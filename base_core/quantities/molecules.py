@@ -98,19 +98,21 @@ class CS2(Molecule):
 
             # Example gas-phase values from Ian MacPhail-Bartley thesis:
             # B = 0.109 cm^-1, Δα ≈ 9 Å^3 :contentReference[oaicite:6]{index=6}
-            gasphase=RotationalBD.from_wavenumber(
-                B=InverseLength(0.109, Prefix.CENTI),  # 0.109 / cm
+            gasphase=RotationalBD(
+                B=InverseLength(0.110, Prefix.CENTI).to_frequency(),  # 0.110 / cm
                 D=None,
                 reference="MacPhail-Bartley thesis (example)",
             ),
 
             # Droplet-renormalized B/D: fill when you have numbers
-            droplet=RotationalBD(),
+            droplet=RotationalBD(
+                B=Frequency(730,Prefix.MEGA),
+                D=Frequency(1.2,Prefix.MEGA),
+                reference="https://doi.org/10.1103/PhysRevLett.125.013001"),
 
             polarizability=Polarizability(
                 iso=None,
-                aniso=PolarizabilityVolume.from_angstrom3(9.0),  # check Prefix.ANGSTOM naming :contentReference[oaicite:7]{index=7}
-                reference="MacPhail-Bartley thesis (example)",
+                aniso=PolarizabilityVolume.from_angstrom3(4.9)  # check Prefix.ANGSTOM naming :contentReference[oaicite:7]{index=7}
             ),
 
             spinnability=(),
@@ -125,9 +127,18 @@ class OCS(Molecule):
             name="Carbonyl sulfide",
             formula="OCS",
             mass=AtomicMass.from_u(60.07),  # optional placeholder
-            gasphase=RotationalBD(),
-            droplet=RotationalBD(),
-            polarizability=Polarizability(),
+            gasphase=RotationalBD(
+                B = Frequency(6,Prefix.GIGA),
+                D=None
+                ),
+            droplet=RotationalBD(
+                B = Frequency(2.18,Prefix.GIGA),
+                D = Frequency(9.5,Prefix.MEGA),
+                reference="https://doi.org/10.1103/PhysRevLett.125.013001"
+                ),
+            polarizability=Polarizability(
+                iso = None,
+                aniso = PolarizabilityVolume.from_angstrom3(3.7)),
             spinnability=(),
             tags=("linear", "droplets"),
         )
