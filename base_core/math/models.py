@@ -197,15 +197,17 @@ class Histogram2D():
     matrix: np.ndarray = None
     x_edges: np.ndarray = None
     y_edges: np.ndarray = None
-    def __init__(self,points: list[Point], x_bins: int, y_bins: int, x_range: Optional[Range[float]] = None, y_range: Optional[Range[float]] = None) -> None:
-        self.points = points
-        self.x_bins = x_bins
-        self.y_bins = y_bins
-        p_x = np.array([p.x for p in points])
-        p_y = np.array([p.y for p in points])
-        self.x_range = x_range if x_range is not None else Range(min(p_x), max(p_x))
-        self.y_range = y_range if y_range is not None else Range(min(p_y), max(p_y))
-        self.compute_histogram(p_x,p_y)
-        
-    def compute_histogram(self,p_x,p_y) -> None:
-        self.matrix, self.x_edges, self.y_edges = np.histogram2d(p_x, p_y, bins=[self.x_bins, self.y_bins], range=[[self.x_range.min, self.x_range.max], [self.y_range.min, self.y_range.max]])
+    
+    @classmethod
+    def compute_histogram(cls,points: Points, center: Point, x_bins: int = 400, y_bins: int = 400, x_range: Optional[Range[float]] = None, y_range: Optional[Range[float]] = None) -> "Histogram2D":
+        p_x = points.x
+        p_y = points.y
+        x_0 , y_0 = center.x, center.y
+        #sigma_x = np.std(p_x,mean=x_0)
+        #sigma_y = np.std(p_y,mean=y_0)
+        #x_range = x_range if x_range is not None else Range(x_0 - sigma_x/2, x_0 + sigma_x/2)
+        #y_range = y_range if y_range is not None else Range(y_0 - sigma_y/2, y_0 + sigma_y/2)
+        #matrix, x_edges, y_edges = np.histogram2d(p_x, p_y, bins=[x_bins, y_bins], range=[[x_range.min, x_range.max], [y_range.min, y_range.max]])
+        matrix, x_edges, y_edges = np.histogram2d(p_x, p_y, bins=[x_bins, y_bins])
+        return cls(matrix,x_edges,y_edges)
+      
