@@ -4,10 +4,11 @@ from dataclasses import dataclass
 import math
 from pathlib import Path
 
+import numpy as np
 
-from _data_io.dat_loader import calculate_time_delay
-from apps.c2t_calculation.domain.analysis import avg_c2t
+
 from base_core.lab_specifics.c2t.config import IonDataAnalysisConfig
+from base_core.lab_specifics.helpers import calculate_time_delay
 from base_core.math.models import Points
 from base_core.quantities.models import Length, Time
 
@@ -51,6 +52,27 @@ class IonData:
     ions_per_frame: float
     stage_position: Length
     points: Points
+    
+    @staticmethod
+    def avg_c2t(points: Points) -> Measurement:
+        """
+        Compute <cos^2(theta)> and its SEM for a set of 2D points, where
+        theta = arctan2(y, x).
+
+        Returns Measurement(mean, sem).
+        """
+        n = len(points)
+        if n == 0:
+            raise ValueError("No ions in data.")
+
+        theta = np.arctan2(points.y, points.x)
+        c2 = np.cos(theta) ** 2
+
+        mean = float(np.mean(c2))
+        std = float(np.std(c2, ddof=1)) if n > 1 else np.nan
+        sem = float(std / math.sqrt(n)) if (n > 1 and np.isfinite(std)) else np.nan
+        return Measurement(mean, sem)
+    
 
 @dataclass
 class RawScanData:
@@ -89,7 +111,7 @@ class C2TScanData(ScanDataBase):
             pts = pts.filter_by_distance_range(config.analysis_zone)
 
             delays.append(calculate_time_delay(d.stage_position, config.delay_center))
-            c2t.append(avg_c2t(pts))
+            c2t.append(IonData.avg_c2t(pts))
             ions.append(d.ions_per_frame)
 
 
