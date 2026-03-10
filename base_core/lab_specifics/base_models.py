@@ -53,6 +53,15 @@ class IonData:
     stage_position: Length
     points: Points
     
+    def get_points_after_config(self, config: IonDataAnalysisConfig) -> Points:
+        pts = Points(self.points.x.copy(), self.points.y.copy())
+        # --- use existing Points methods ---
+        pts.subtract(config.center)
+        pts.affine_transform(config.transform_parameter)
+        pts.rotate(config.angle)  # rotation around origin (already centered)
+        pts = pts.filter_by_distance_range(config.analysis_zone)
+        return pts
+    
     @staticmethod
     def avg_c2t(points: Points) -> Measurement:
         """
@@ -102,13 +111,7 @@ class C2TScanData(ScanDataBase):
 
         for d in raw.ion_datas:
             # --- copy raw points so we do NOT mutate RawScanData ---
-            pts = Points(d.points.x.copy(), d.points.y.copy())
-
-            # --- use existing Points methods ---
-            pts.subtract(config.center)
-            pts.affine_transform(config.transform_parameter)
-            pts.rotate(config.angle)  # rotation around origin (already centered)
-            pts = pts.filter_by_distance_range(config.analysis_zone)
+            pts = d.get_points_after_config(config)
 
             delays.append(calculate_time_delay(d.stage_position, config.delay_center))
             c2t.append(IonData.avg_c2t(pts))
