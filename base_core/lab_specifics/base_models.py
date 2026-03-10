@@ -7,8 +7,8 @@ from pathlib import Path
 
 from _data_io.dat_loader import calculate_time_delay
 from apps.c2t_calculation.domain.analysis import avg_c2t
-from apps.c2t_calculation.domain.config import IonDataAnalysisConfig
-from base_core.math.models import Point, Range, Points
+from base_core.lab_specifics.c2t.config import IonDataAnalysisConfig
+from base_core.math.models import Points
 from base_core.quantities.models import Length, Time
 
 
