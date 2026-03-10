@@ -1,7 +1,7 @@
 from dataclasses import dataclass
-from pathlib import Path
 
-from _domain.models import ScanDataBase
+from base_core.lab_specifics.base_models import ScanDataBase
+
 
 @dataclass(frozen=True)
 class AveragedScansData(ScanDataBase):
