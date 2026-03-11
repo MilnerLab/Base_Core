@@ -191,16 +191,16 @@ class Molecule:
             D_hz=D_hz,
         )
 
-        # slope-based local effective rotational constant
-        eff_inverse_momentum = B_hz - 2.0 * D_hz * J * (J + 1.0)
+        # slope-based local effective inverse momentum
+        eff_inverse_I = B_hz - 2.0 * D_hz * J * (J + 1.0)
 
-        if eff_inverse_momentum <= 0.0:
+        if eff_inverse_I <= 0.0:
             raise ValueError(
                 "B_eff_hz became <= 0. The requested frequency is at or beyond the centrifugal wall."
             )
 
         # local effective moment of inertia
-        I_eff_kg_m2 = PLANCK_H_J_S / (8.0 * pi**2 * eff_inverse_momentum)
+        I_eff_kg_m2 = PLANCK_H_J_S / (8.0 * pi**2 * eff_inverse_I)
 
         # low-temperature spinnability
         sigma0 = 2.0 * U0_J / (pi * I_eff_kg_m2 * angular_acceleration_rad_per_s2)
