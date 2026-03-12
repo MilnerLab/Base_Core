@@ -15,5 +15,5 @@ class PlotColorMap(str, Enum):
     INFERNO = "inferno"
     MAGMA = "magma"
     CIVIDIS = "cividis"
-    
+    GREENS = "Greens"
     

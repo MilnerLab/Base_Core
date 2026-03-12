@@ -129,7 +129,7 @@ class OCS(Molecule):
             mass=AtomicMass.from_u(60.07),  # optional placeholder
             gasphase=RotationalBD(
                 B = Frequency(6,Prefix.GIGA),
-                D=None
+                D=InverseLength(0.4*10**-7,Prefix.CENTI)
                 ),
             droplet=RotationalBD(
                 B = Frequency(2.18,Prefix.GIGA),
