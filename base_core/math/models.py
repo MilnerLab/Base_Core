@@ -204,7 +204,7 @@ class Histogram2D():
             raise TypeError("x_bins and y_bins must either both be None or both be integers")
         
         radial_width = radial_range.max - radial_range.min
-        if bin_size > radial_width: 
+        #if bin_size > radial_width: 
         #x_0 , y_0 = center.x, center.y
         
         p_x = points.x
