@@ -87,6 +87,7 @@ class IonData:
 class RawScanData:
     run_id: int
     ion_datas: list[IonData]
+    number_of_scans: int
     
     def add_ion_data(self, ion_data: IonData) -> None:
         if ion_data.id != self.run_id:
@@ -98,7 +99,7 @@ class RawScanData:
 class C2TScanData(ScanDataBase):
     config: IonDataAnalysisConfig
     ions_per_frame: list[float] | None = None
-
+    
     @classmethod
     def from_raw(
         cls,

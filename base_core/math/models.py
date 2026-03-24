@@ -198,21 +198,22 @@ class Histogram2D():
     y_edges: np.ndarray = None
     
     @classmethod
-    def compute_histogram(cls, points: Points, bin_size: float = 0.4, radial_range: Range[float] = Range(0,60), x_bins: Optional[int] = 400, y_bins: Optional[int] = 400) -> "Histogram2D":
+    def compute_histogram(cls, points: Points, x_bins: int = 400, y_bins: int = 400, bin_size: float = 0.4, radial_range: Range[float] = Range(0,60)) -> "Histogram2D":
         
         if x_bins is None and y_bins is not None | y_bins is None and x_bins is not None: 
-            raise TypeError("x_bins and y_bins must either both be None or both be integers")
+            raise TypeError("x_bins and y_bins must either both be None or both be integers.")
         
         radial_width = radial_range.max - radial_range.min
-        if bin_size > radial_width: 
+        if bin_size > 2*radial_width: 
+            raise ValueError("Bin size cannot be larger than the region of interest.")
         #x_0 , y_0 = center.x, center.y
         
         p_x = points.x
         p_y = points.y    
         
 
-        x_bins = 2*radial_range*bin_size if x_bins is not None else x_bins
-        x_bins = 2*radial_range*bin_size if x_bins is not None else x_bins
+        x_bins = 2*radial_width/bin_size if x_bins is None else x_bins
+        y_bins = 2*radial_width/bin_size if y_bins is None else y_bins
         #matrix, x_edges, y_edges = np.histogram2d(p_x, p_y, bins=[x_bins, y_bins], range=[[x_range.min, x_range.max], [y_range.min, y_range.max]])
         matrix, x_edges, y_edges = np.histogram2d(p_x, p_y, bins=[x_bins, y_bins])
         return cls(matrix,x_edges,y_edges)
