@@ -282,3 +282,41 @@ class OCS(Molecule):
             spinnability=(),
             tags=("heavy", "droplets"),
         )
+        
+class DIB(Molecule):
+    def __init__(self) -> None:
+        super().__init__(
+            key="dib",
+            name="1,4-Diiodobenzene",
+            formula="C6H4I2",
+            mass=AtomicMass.from_u(329.9), 
+
+            gasphase=RotationalBD(
+                B=InverseLength(0, Prefix.CENTI).to_frequency(),
+                D=InverseLength(0, Prefix.NANO).to_frequency(),
+                reference="10.1021/acs.jpca.9b11433"),
+
+            polarizability=Polarizability(
+                tensor=(
+                    (
+                        PolarizabilityVolume.from_angstrom3(11.307),
+                        PolarizabilityVolume.from_angstrom3(0.0),
+                        PolarizabilityVolume.from_angstrom3(0.0),
+                    ),
+                    (
+                        PolarizabilityVolume.from_angstrom3(0.0),
+                        PolarizabilityVolume.from_angstrom3(16.676),
+                        PolarizabilityVolume.from_angstrom3(0.0),
+                    ),
+                    (
+                        PolarizabilityVolume.from_angstrom3(0.0),
+                        PolarizabilityVolume.from_angstrom3(0.0),
+                        PolarizabilityVolume.from_angstrom3(32.667),
+                    ),
+                ),
+                bond_axis=CartesianAxis.Z, #I-I axis
+                aniso = PolarizabilityVolume.from_angstrom3(21.3),
+                reference="10.1021/acs.jpca.9b11433"),
+
+            tags=("linear", "droplets"),
+        )
