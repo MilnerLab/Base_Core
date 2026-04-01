@@ -10,7 +10,7 @@ from base_core.math.enums import CartesianAxis
 from base_core.quantities.enums import Prefix
 from base_core.quantities.constants import BOLTZMANN_J_K, EPS0_F_M, PLANCK_H_J_S, SPEED_OF_LIGHT
 
-from base_core.quantities.models import Frequency, InverseLength, Temperature
+from base_core.quantities.models import Frequency, InverseLength, Length, Temperature
 from base_core.quantities.specific_models import AtomicMass, Intensity, PolarizabilityVolume
 
 TensorRow: TypeAlias = tuple[
@@ -121,6 +121,7 @@ class Molecule:
     cas: Optional[str] = None
 
     mass: Optional[AtomicMass] = None  # AtomicMass is a Mass in kg, with from_u() :contentReference[oaicite:5]{index=5}
+    rotational_radius: Optional[Length] = None
 
     gasphase: RotationalBD = field(default_factory=RotationalBD)
     droplet: RotationalBD = field(default_factory=RotationalBD)
@@ -225,6 +226,8 @@ class CS2(Molecule):
             name="Carbon disulfide",
             formula="CS2",
             mass=AtomicMass.from_u(76.14), 
+            
+            rotational_radius=Length(1.553, Prefix.ANGSTROM), # sulfur
 
             gasphase=RotationalBD(
                 B=InverseLength(0.110, Prefix.CENTI).to_frequency(),
@@ -248,7 +251,9 @@ class OCS(Molecule):
             key="ocs",
             name="Carbonyl sulfide",
             formula="OCS",
-            mass=AtomicMass.from_u(60.07),  
+            mass=AtomicMass.from_u(60.07), 
+            rotational_radius=Length(1.680, Prefix.ANGSTROM), # oxygen 
+            
             
             gasphase=RotationalBD(
                 B = Frequency(6,Prefix.GIGA),
@@ -277,7 +282,7 @@ class OCS(Molecule):
                         PolarizabilityVolume.from_angstrom3(34.0),
                     ),
                 ),
-                bond_axis=CartesianAxis.Z, #I-I axis
+                bond_axis=CartesianAxis.Z,
                 aniso = PolarizabilityVolume.from_angstrom3(3.7)),
             spinnability=(),
             tags=("heavy", "droplets"),
@@ -290,10 +295,10 @@ class DIB(Molecule):
             name="1,4-Diiodobenzene",
             formula="C6H4I2",
             mass=AtomicMass.from_u(329.9), 
+            rotational_radius=Length(3.45, Prefix.ANGSTROM), # iodine
 
             gasphase=RotationalBD(
-                B=InverseLength(0, Prefix.CENTI).to_frequency(),
-                D=InverseLength(0, Prefix.NANO).to_frequency(),
+                B=Frequency(156.86, Prefix.MEGA),
                 reference="10.1021/acs.jpca.9b11433"),
 
             polarizability=Polarizability(
@@ -318,5 +323,5 @@ class DIB(Molecule):
                 aniso = PolarizabilityVolume.from_angstrom3(21.3),
                 reference="10.1021/acs.jpca.9b11433"),
 
-            tags=("linear", "droplets"),
+            tags=("asymmetric top", "droplets"),
         )
