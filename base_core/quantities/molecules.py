@@ -284,7 +284,7 @@ class OCS(Molecule):
                 ),
                 bond_axis=CartesianAxis.Z,
                 aniso = PolarizabilityVolume.from_angstrom3(3.7)),
-            spinnability=(),
+            
             tags=("heavy", "droplets"),
         )
         
