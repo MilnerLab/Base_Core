@@ -8,7 +8,7 @@ import threading
 TEvent = TypeVar("TEvent")
 
 
-@dataclass(frozen=True)
+@dataclass()
 class EventBus:
     def __post_init__(self) -> None:
         self._lock = threading.RLock()
