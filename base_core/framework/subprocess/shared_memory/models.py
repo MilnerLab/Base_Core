@@ -4,6 +4,7 @@ from dataclasses import dataclass, asdict
 from typing import Any
 import json
 import struct
+from typing_extensions import Literal
 
 import numpy as np
 
@@ -113,3 +114,12 @@ class SharedRingBufferSpec:
             slot_size=slot_size,
         )
 
+SlotState = Literal["FREE", "WRITING", "PUBLISHED"]
+
+
+@dataclass
+class SlotInfo:
+    state: SlotState = "FREE"
+    frame_id: int | None = None
+    pending_consumers: int = 0
+    acked_mask: int = 0
