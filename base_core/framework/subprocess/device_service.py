@@ -6,7 +6,7 @@ from typing import Any, Callable, Dict, Mapping, Optional
 
 from base_core.framework.concurrency.interfaces import ITaskRunner
 from base_core.framework.concurrency.models import StreamHandle
-from base_core.framework.json.json_endpoint import JsonlSubprocessEndpoint
+from base_core.framework.subprocess.json_endpoint import JsonlSubprocessEndpoint
 
 
 EventHandler = Callable[[dict], None]
