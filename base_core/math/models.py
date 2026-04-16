@@ -11,6 +11,7 @@ from base_core.math.enums import AngleUnit, CartesianAxis, XZ
 
 FloatArray = npt.NDArray[np.float64]
 IntArray = np.ndarray
+IntArray = np.ndarray
 
 class SupportsOrdering(Protocol):
     def __lt__(self, other: Self, /) -> bool: ...
@@ -236,24 +237,6 @@ class Points:
         else:
             m = (d > float(r.min)) & (d < float(r.max))
         return Points(self.x[m], self.y[m])
-    
-    def append_points(self,pts: "Points") -> None:
-        self.x = np.append(self.x,pts.x)
-        self.y = np.append(self.y,pts.y)
-        
-
-
-    def copy(self) -> "Points":
-        return Points(self.x.copy(), self.y.copy())
-
-    def as_array(self) -> FloatArray:
-        """
-        Return points as array with shape (N, 2).
-
-        This creates a new array.
-        """
-
-        return np.column_stack((self.x, self.y))
 
 @dataclass(slots=True)
 class MarkedPoints(Points):
@@ -294,47 +277,17 @@ class MarkedPoints(Points):
             raise ValueError("mask must have same shape as data")
         return MarkedPoints(self.x[mask], self.y[mask], self.marker[mask])
     
-    def unique_observed_markers(self) -> np.ndarray:
+    def unique_markers(self) -> np.ndarray:
         return np.unique(self.marker)
 
     @property
-    def n_observed_markers(self) -> int:
+    def n_markers(self) -> int:
         if len(self.marker) == 0:
             return 0
         return int(np.unique(self.marker).size)
 
-    @property
-    def marker_min(self) -> int | None:
-        if len(self.marker) == 0:
-            return None
-        return int(np.min(self.marker))
-
-    @property
-    def marker_max(self) -> int | None:
-        if len(self.marker) == 0:
-            return None
-        return int(np.max(self.marker))
-
-    @property
-    def n_marker_span(self) -> int:
-        """
-        Total number of marker slots assuming consecutive integer markers.
-        Includes skipped/empty markers.
-        """
-        if len(self.marker) == 0:
-            return 0
-        return int(np.max(self.marker) - np.min(self.marker) + 1)
-
-    def avg_points_per_observed_marker(self) -> float:
-        n = self.n_observed_markers
-        return 0.0 if n == 0 else len(self) / n
-
     def avg_points_per_marker(self) -> float:
-        """
-        Average points per marker INCLUDING skipped empty markers,
-        assuming markers are consecutive integer frame IDs.
-        """
-        n = self.n_marker_span
+        n = self.n_markers
         return 0.0 if n == 0 else len(self) / n
         
 @dataclass(frozen=True)
@@ -372,86 +325,130 @@ class Points3D:
         return cls(x, y, z)
 
     @classmethod
-    def from_spherical(cls, r, theta, phi) -> "Points3D":
-        """
-        Physics convention:
-            x = r sin(theta) cos(phi)
-            y = r sin(theta) sin(phi)
-            z = r cos(theta)
+    def compute_histogram(cls, points: Points, x_bins: int = 400, y_bins: int = 400, bin_size: float = 0.4, radial_range: Range[float] = Range(0,60)) -> "Histogram2D":
+        
+        if x_bins is None and y_bins is not None | y_bins is None and x_bins is not None: 
+            raise TypeError("x_bins and y_bins must either both be None or both be integers.")
+        
+        radial_width = radial_range.max - radial_range.min
+        if bin_size > 2*radial_width: 
+            raise ValueError("Bin size cannot be larger than the region of interest.")
+        #x_0 , y_0 = center.x, center.y
+        
+        p_x = points.x
+        p_y = points.y    
+        
 
-        theta: polar angle from +z axis
-        phi: azimuth angle in xy plane
-        """
-        r, theta, phi = np.broadcast_arrays(
-            np.asarray(r, dtype=np.float64),
-            np.asarray(theta, dtype=np.float64),
-            np.asarray(phi, dtype=np.float64),
-        )
+        x_bins = 2*radial_width/bin_size if x_bins is None else x_bins
+        y_bins = 2*radial_width/bin_size if y_bins is None else y_bins
+        #matrix, x_edges, y_edges = np.histogram2d(p_x, p_y, bins=[x_bins, y_bins], range=[[x_range.min, x_range.max], [y_range.min, y_range.max]])
+        matrix, x_edges, y_edges = np.histogram2d(p_x, p_y, bins=[x_bins, y_bins])
+        return cls(matrix,x_edges,y_edges)
 
-        sin_theta = np.sin(theta)
+
+@dataclass(frozen=True)
+class AngularCovariance:
+    matrix: np.ndarray
+    theta1_edges: np.ndarray
+    theta2_edges: np.ndarray
+    n_frames: int
+
+    @classmethod
+    def compute_covariance(
+        cls,
+        hits: MarkedPoints,
+        angle_bins: int = 90,
+        radial_range: Range[float] | None = None,
+        binary_per_frame: bool = False,
+    ) -> "AngularCovariance":
+        """
+        Compute angular covariance in the same spirit as the old ThetaToAngCov code:
+        - theta wrapped to [0, 2*pi)
+        - per-marker angular histograms
+        - covariance formed from centered histograms
+        - normalization by total number of hits (not by number of markers)
+        - matrix rolled by 90 degrees
+        - diagonal set to zero
+
+        Notes
+        -----
+        This reproduces the *style* of the older code, but uses robust grouping by
+        marker instead of assuming the data are already sorted and contiguous by frame.
+        """
+
+        if len(hits) == 0:
+            raise ValueError("No hits available.")
+
+        x = hits.x
+        y = hits.y
+        marker = hits.marker
+
+        if radial_range is not None:
+            r = np.hypot(x, y)
+            mask = (r >= float(radial_range.min)) & (r <= float(radial_range.max))
+            x = x[mask]
+            y = y[mask]
+            marker = marker[mask]
+
+        if x.size == 0:
+            raise ValueError("No hits left after radial filter.")
+
+        # same as TidyTheta
+        theta = np.mod(np.arctan2(y, x), 2.0 * np.pi)
+
+        # bin edges over [0, 2*pi)
+        bin_edges = np.linspace(0.0, 2.0 * np.pi, angle_bins + 1)
+
+        # angle bin index
+        bin_idx = np.digitize(theta, bin_edges) - 1
+        bin_idx = np.clip(bin_idx, 0, angle_bins - 1)
+
+        # robust marker grouping
+        unique_markers, inv = np.unique(marker, return_inverse=True)
+        n_markers = unique_markers.size
+
+        if n_markers == 0:
+            raise ValueError("No markers found.")
+
+        # ThDist[marker_index, angle_bin]
+        th_dist = np.zeros((n_markers, angle_bins), dtype=np.float32)
+
+        if binary_per_frame:
+            # optional occupancy version; old code used counts, so leave False for exact match
+            pairs = np.column_stack((inv, bin_idx))
+            unique_pairs = np.unique(pairs, axis=0)
+            th_dist[unique_pairs[:, 0], unique_pairs[:, 1]] = 1.0
+        else:
+            np.add.at(th_dist, (inv, bin_idx), 1.0)
+
+        # mean histogram over markers
+        th_bar = th_dist.mean(axis=0)
+
+        # centered distributions
+        th_diff = th_dist - th_bar
+
+        # same structure as einsum in old code
+        ang_cov_unscaled = np.einsum("fi,fj->ij", th_diff, th_diff)
+
+        # IMPORTANT:
+        # old code normalized by total number of hits, not by number of markers
+        ang_cov = ang_cov_unscaled / len(theta)
+
+        # enforce symmetry (usually already symmetric, but kept to mimic old behavior)
+        i_lower = np.tril_indices(angle_bins, -1)
+        ang_cov[i_lower] = ang_cov.T[i_lower]
+
+        # shift by 90 degrees in both axes
+        shift = angle_bins // 4
+        ang_cov = np.roll(ang_cov, shift=shift, axis=0)
+        ang_cov = np.roll(ang_cov, shift=shift, axis=1)
+
+        # remove autovariance diagonal
+        np.fill_diagonal(ang_cov, 0.0)
 
         return cls(
-            (r * sin_theta * np.cos(phi)).ravel(),
-            (r * sin_theta * np.sin(phi)).ravel(),
-            (r * np.cos(theta)).ravel(),
+            matrix=ang_cov,
+            theta1_edges=bin_edges,
+            theta2_edges=bin_edges.copy(),
+            n_frames=n_markers,
         )
-
-    def to_spherical(self) -> tuple[FloatArray, FloatArray, FloatArray]:
-        """
-        Returns:
-            r, theta, phi
-
-        theta in [0, pi]
-        phi in [0, 2*pi)
-        """
-        r = np.sqrt(self.x**2 + self.y**2 + self.z**2)
-
-        theta = np.zeros_like(r)
-        mask = r > 0.0
-        theta[mask] = np.arccos(np.clip(self.z[mask] / r[mask], -1.0, 1.0))
-
-        phi = np.mod(np.arctan2(self.y, self.x), 2.0 * np.pi)
-
-        return r, theta, phi
-
-    def coordinate(self, axis: CartesianAxis) -> FloatArray:
-        axis = axis.require_single()
-
-        if axis is CartesianAxis.X:
-            return self.x
-        if axis is CartesianAxis.Y:
-            return self.y
-        if axis is CartesianAxis.Z:
-            return self.z
-
-        raise ValueError(f"Unsupported axis: {axis}")
-
-    def project_to_plane(self, plane: CartesianAxis = XZ) -> "Points":
-        a, b = plane.require_plane().axes()
-        return Points(self.coordinate(a).copy(), self.coordinate(b).copy())
-
-    def radius(self) -> FloatArray:
-        return np.sqrt(self.x**2 + self.y**2 + self.z**2)
-
-    def normalized(self) -> "Points3D":
-        r = self.radius()
-        if np.any(r == 0.0):
-            raise ValueError("Cannot normalize points containing zero vectors")
-
-        return Points3D(self.x / r, self.y / r, self.z / r)
-
-    def normalize_inplace(self) -> None:
-        r = self.radius()
-        if np.any(r == 0.0):
-            raise ValueError("Cannot normalize points containing zero vectors")
-
-        self.x /= r
-        self.y /= r
-        self.z /= r
-
-    def copy(self) -> "Points3D":
-        return Points3D(self.x.copy(), self.y.copy(), self.z.copy())
-
-    def as_array(self) -> FloatArray:
-        return np.column_stack((self.x, self.y, self.z))
-           
