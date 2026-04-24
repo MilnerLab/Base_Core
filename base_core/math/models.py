@@ -230,17 +230,47 @@ class MarkedPoints(Points):
             raise ValueError("mask must have same shape as data")
         return MarkedPoints(self.x[mask], self.y[mask], self.marker[mask])
     
-    def unique_markers(self) -> np.ndarray:
+    def unique_observed_markers(self) -> np.ndarray:
         return np.unique(self.marker)
 
     @property
-    def n_markers(self) -> int:
+    def n_observed_markers(self) -> int:
         if len(self.marker) == 0:
             return 0
         return int(np.unique(self.marker).size)
 
+    @property
+    def marker_min(self) -> int | None:
+        if len(self.marker) == 0:
+            return None
+        return int(np.min(self.marker))
+
+    @property
+    def marker_max(self) -> int | None:
+        if len(self.marker) == 0:
+            return None
+        return int(np.max(self.marker))
+
+    @property
+    def n_marker_span(self) -> int:
+        """
+        Total number of marker slots assuming consecutive integer markers.
+        Includes skipped/empty markers.
+        """
+        if len(self.marker) == 0:
+            return 0
+        return int(np.max(self.marker) - np.min(self.marker) + 1)
+
+    def avg_points_per_observed_marker(self) -> float:
+        n = self.n_observed_markers
+        return 0.0 if n == 0 else len(self) / n
+
     def avg_points_per_marker(self) -> float:
-        n = self.n_markers
+        """
+        Average points per marker INCLUDING skipped empty markers,
+        assuming markers are consecutive integer frame IDs.
+        """
+        n = self.n_marker_span
         return 0.0 if n == 0 else len(self) / n
     
     def append_points(self,pts: "Points") -> None:
