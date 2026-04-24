@@ -6,10 +6,9 @@ from pathlib import Path
 
 import numpy as np
 
-
 from base_core.lab_specifics.c2t.config import IonDataAnalysisConfig
 from base_core.lab_specifics.helpers import calculate_time_delay
-from base_core.math.models import Points
+from base_core.math.models import MarkedPoints, Points
 from base_core.quantities.models import Length, Time
 
 
@@ -51,10 +50,10 @@ class IonData:
     id: int
     ions_per_frame: float
     stage_position: Length
-    points: Points
+    points: MarkedPoints
     
-    def get_points_after_config(self, config: IonDataAnalysisConfig) -> Points:
-        pts = Points(self.points.x.copy(), self.points.y.copy())
+    def get_points_after_config(self, config: IonDataAnalysisConfig) -> MarkedPoints:
+        pts = MarkedPoints(self.points.x.copy(), self.points.y.copy(), self.points.marker.copy())
         # --- use existing Points methods ---
         pts.subtract(config.center)
         pts.affine_transform(config.transform_parameter)
