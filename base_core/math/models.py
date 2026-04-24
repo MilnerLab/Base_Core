@@ -189,7 +189,11 @@ class Points:
         else:
             m = (d > float(r.min)) & (d < float(r.max))
         return Points(self.x[m], self.y[m])
-
+    
+    def append_points(self,pts: "Points") -> None:
+        self.x = np.append(self.x,pts.x)
+        self.y = np.append(self.y,pts.y)
+        
         
 @dataclass(frozen=True)
 class Histogram2D():
