@@ -91,7 +91,7 @@ class RawScanData:
     
     def add_ion_data(self, ion_data: IonData) -> None:
         if ion_data.id != self.run_id:
-            raise ValueError('IonData does not belonge to this run.')
+            raise ValueError('IonData does not belong to this run.')
     
         self.ion_datas.append(ion_data)
             
@@ -125,3 +125,4 @@ class C2TScanData(ScanDataBase):
             config=config,
             run_id=raw.run_id,
             ions_per_frame = ions)
+        
