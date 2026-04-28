@@ -33,14 +33,14 @@ class ScanDataBase:
                     w.writerow([d, m.value, m.error])
             print("Data saved to:",path)
             
-    def cut(self, start: int = 0, end: int = 0) -> None:
+    def cut(self, start: int = 0, end: int = -1) -> None:
         n = len(self.delays)
-        if len(self.measured_values) != n or start < 0 or end < 0 or start + end > n:
+        if len(self.measured_values) != n or start < 0 or end < 0 or abs(start - end) < 2:
             raise ValueError("Invalid cut range.")
 
         if end:
-            del self.delays[-end:]
-            del self.measured_values[-end:]
+            del self.delays[end+1:]
+            del self.measured_values[end+1:]
         if start:
             del self.delays[:start]
             del self.measured_values[:start]
