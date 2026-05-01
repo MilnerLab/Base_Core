@@ -34,3 +34,7 @@ class PressureUnit(Enum):
     # imperial
     PSI  = 6_894.757293168
     INHG = 133.322387415 * 25.4       # = 3386.388640341 Pa (from mmHg)
+    
+class CircularHandedness(Enum):
+    RIGHT = +1
+    LEFT = -1
