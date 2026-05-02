@@ -1,6 +1,11 @@
+from __future__ import annotations
 
-from typing import Sequence
+from dataclasses import dataclass, field
+from math import factorial, pi
+from typing import Mapping, Sequence
+
 import numpy as np
+from scipy.special import lpmv
 
 from base_core.quantities.constants import SPEED_OF_LIGHT
 
@@ -86,3 +91,50 @@ def cfg_projection_nu_equal_amplitudes_safe(
 
     I = baseline + (1.0 - baseline) * (I_env * modulation)
     return I
+
+
+@dataclass(frozen=True, slots=True)
+class SphericalHarmonic:
+    """
+    Single spherical harmonic Y_l^m(theta, phi).
+
+    Convention:
+        theta = polar angle from +z axis
+        phi   = azimuth angle in xy plane
+
+    Uses the physics convention including the Condon-Shortley phase.
+    """
+
+    l: int
+    m: int
+
+    def __post_init__(self) -> None:
+        if self.l < 0:
+            raise ValueError("l must be >= 0")
+        if abs(self.m) > self.l:
+            raise ValueError("m must satisfy |m| <= l")
+
+    def __call__(self, theta, phi) -> np.ndarray:
+        theta = np.asarray(theta, dtype=np.float64)
+        phi = np.asarray(phi, dtype=np.float64)
+
+        if self.m >= 0:
+            return self._positive_m(self.l, self.m, theta, phi)
+
+        m_abs = abs(self.m)
+
+        # Y_l^{-m} = (-1)^m conj(Y_l^m)
+        return (-1) ** m_abs * np.conjugate(
+            self._positive_m(self.l, m_abs, theta, phi)
+        )
+
+    @staticmethod
+    def _positive_m(l: int, m: int, theta: np.ndarray, phi: np.ndarray) -> np.ndarray:
+        norm = np.sqrt(
+            (2 * l + 1)
+            / (4 * pi)
+            * factorial(l - m)
+            / factorial(l + m)
+        )
+
+        return norm * lpmv(m, l, np.cos(theta)) * np.exp(1j * m * phi)

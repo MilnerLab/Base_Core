@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from turtle import left
 import numpy as np
 from numpy.typing import NDArray
 
@@ -19,7 +20,7 @@ DELTA_BETA = AngularChirp(5.9e-4, time_prefix=Prefix.PICO) # Chirp mismatch: 5.9
 
 DELTA_DELAY_ARM = Length(1.5, Prefix.MILLI)
 
-@dataclass(frozen=True)
+@dataclass()
 class OpticalCentrifuge:
     """
     Optical centrifuge built from two oppositely circularly polarized chirped arms.
@@ -41,9 +42,20 @@ class OpticalCentrifuge:
         t_ret = t - z / c.
     """
 
-    right_arm = CircularChirpedPulse(1, CENTRAL_FREQUENCY, BETA_0, PHASE_0, T, CircularHandedness.RIGHT)
-    left_arm = CircularChirpedPulse(1, CENTRAL_FREQUENCY, AngularChirp(BETA_0 + DELTA_BETA), PHASE_0, T, CircularHandedness.LEFT)
+    right_arm: CircularChirpedPulse
+    left_arm : CircularChirpedPulse
 
+    def __init__(self, right_arm: CircularChirpedPulse = None, left_arm: CircularChirpedPulse = None):
+        if right_arm is None:
+            self.right_arm = CircularChirpedPulse(1, CENTRAL_FREQUENCY, BETA_0, PHASE_0, T, CircularHandedness.RIGHT)
+        else:
+            self.right_arm = right_arm
+        
+        if left_arm is None:
+            self.left_arm = CircularChirpedPulse(1, CENTRAL_FREQUENCY, AngularChirp(BETA_0 + DELTA_BETA), PHASE_0, T, CircularHandedness.LEFT)
+        else:
+            self.left_arm = left_arm
+        
     def __post_init__(self) -> None:
         if self.right_arm.handedness == self.left_arm.handedness:
             raise ValueError(
