@@ -3,7 +3,7 @@ import numpy as np
 from base_core.framework.serialization.serde import Primitive, PrimitiveSerde
 from base_core.quantities.constants import BOHR_RADIUS_M, EPS0_F_M, U_KG
 from base_core.quantities.enums import Prefix
-from base_core.quantities.models import Mass, Power, Time, Volume
+from base_core.quantities.models import Frequency, Mass, Power, Time, Volume
 
 
 class AtomicMass(Mass):
@@ -107,3 +107,49 @@ class Energy(float, PrimitiveSerde):
     @classmethod
     def from_primitive(cls, v: Primitive) -> "Energy":
         return cls(float(v))  # interpret as J
+    
+class AngularFrequency(float, PrimitiveSerde):
+    """Angular frequency. Internal unit: rad/s."""
+
+    def __new__(cls, value: float, prefix: Prefix = Prefix.NONE):
+        return super().__new__(cls, float(value) * prefix.value)
+
+    def value(self, prefix: Prefix = Prefix.NONE) -> float:
+        return float(self) / prefix.value
+
+    @classmethod
+    def from_frequency(cls, frequency: Frequency) -> "AngularFrequency":
+        return cls(2.0 * np.pi * float(frequency))
+
+    def to_frequency(self) -> Frequency:
+        return Frequency(float(self) / (2.0 * np.pi))
+
+    def to_primitive(self) -> float:
+        return float(self)
+
+    @classmethod
+    def from_primitive(cls, v: Primitive) -> "AngularFrequency":
+        return cls(float(v))
+
+
+class AngularChirp(float, PrimitiveSerde):
+    """
+    Linear angular-frequency chirp. Internal unit: rad/s^2.
+
+    Example:
+        AngularChirp(3.7e-2, time_prefix=Prefix.PICO)
+        represents 3.7e-2 rad/ps^2.
+    """
+
+    def __new__(cls, value: float, time_prefix: Prefix = Prefix.NONE):
+        return super().__new__(cls, float(value) / (time_prefix.value ** 2))
+
+    def value(self, time_prefix: Prefix = Prefix.NONE) -> float:
+        return float(self) * (time_prefix.value ** 2)
+
+    def to_primitive(self) -> float:
+        return float(self)
+
+    @classmethod
+    def from_primitive(cls, v: Primitive) -> "AngularChirp":
+        return cls(float(v))
