@@ -32,18 +32,7 @@ class ScanDataBase:
                 for d, m in zip(self.delays, self.measured_values):
                     w.writerow([d, m.value, m.error])
             print("Data saved to:",path)
-            
-    def cut(self, start: int = 0, end: int = 0) -> None:
-        n = len(self.delays)
-        if len(self.measured_values) != n or start < 0 or end < 0 or abs(start - end) < 2:
-            raise ValueError("Invalid cut range.")
-
-        if end:
-            del self.delays[end+1:]         #inclusive
-            del self.measured_values[end+1:] 
-        if start:
-            del self.delays[:start]         #exclusive
-            del self.measured_values[:start]
+        
 
 @dataclass
 class IonData:
@@ -125,3 +114,17 @@ class C2TScanData(ScanDataBase):
             run_id=raw.run_id,
             ions_per_frame = ions)
         
+    def cut(self, start: Time = None, end: Time = None) -> "C2TScanData":
+        n = len(self.delays)
+        
+        if len(self.measured_values) != n:
+            raise ValueError("delays and measured values are out of sync.")
+        if start >= end:
+            raise ValueError("Invalid cut range.")
+        start = start.to_primitive()
+        end = end.to_primitive()
+        mask = [start <= t <= end for t in self.delays]
+        selected_delays = [t for t, m in zip(self.delays, mask) if m]
+        selected_measured_values = [v for v, m in zip(self.measured_values, mask) if m]        
+        return type(self)(selected_delays,selected_measured_values,self.config,self.run_id,self.ions_per_frame)
+    

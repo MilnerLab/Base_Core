@@ -127,7 +127,7 @@ class OCS(Molecule):
             
             gasphase=RotationalBD(
                 B = Frequency(6,Prefix.GIGA),
-                D=InverseLength(0.4*10**-7,Prefix.CENTI)
+                D=InverseLength(0.4*10**-7,Prefix.CENTI).to_frequency()
                 ),
             droplet=RotationalBD(
                 B = Frequency(2.18,Prefix.GIGA),
