@@ -1,6 +1,6 @@
 from xml.dom import ValidationErr
 from matplotlib.axes import Axes
-from base_core.math.models import Histogram2D
+from base_core.math.special_models import Histogram2D
 from base_core.plotting.enums import PlotColor, PlotColorMap
 from base_core.quantities.enums import Prefix
 import numpy as np
