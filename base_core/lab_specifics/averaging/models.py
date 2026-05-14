@@ -6,3 +6,4 @@ from base_core.lab_specifics.base_models import ScanDataBase
 @dataclass(frozen=True)
 class AveragedScansData(ScanDataBase):
     run_ids: list[int]
+    ions_per_frame: list[float]

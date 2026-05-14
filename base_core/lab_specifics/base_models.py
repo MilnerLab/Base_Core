@@ -125,6 +125,7 @@ class C2TScanData(ScanDataBase):
         end = end.to_primitive()
         mask = [start <= t <= end for t in self.delays]
         selected_delays = [t for t, m in zip(self.delays, mask) if m]
-        selected_measured_values = [v for v, m in zip(self.measured_values, mask) if m]        
-        return type(self)(selected_delays,selected_measured_values,self.config,self.run_id,self.ions_per_frame)
+        selected_measured_values = [v for v, m in zip(self.measured_values, mask) if m]   
+        selected_ions_per_frame = [v for v, m in zip(self.ions_per_frame, mask) if m ]     
+        return type(self)(selected_delays,selected_measured_values,self.config,self.run_id,selected_ions_per_frame)
     
