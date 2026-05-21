@@ -2,6 +2,7 @@ from enum import Enum
 
 
 class PlotColor(str, Enum):
+    WHITE = "w"
     BLUE   = "b"
     RED    = "r"
     GREEN  = "g"
