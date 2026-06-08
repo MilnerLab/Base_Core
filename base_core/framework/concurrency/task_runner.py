@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import queue
 import threading
 from dataclasses import dataclass
-from typing import Callable, Hashable, Iterable, Optional
+from typing import Callable, Hashable, Iterable, Optional, TypeVar
 from concurrent.futures import Future, ThreadPoolExecutor
 
-from .interfaces import T, ITaskRunner, StreamHandle
+from base_core.framework.concurrency.models import StreamHandle
+
+
+# Sentinel distinct from any possible item, so a producer that legitimately
+# yields None is never mistaken for "no value".
+_NOTHING = object()
+T = TypeVar("T")
 
 
 @dataclass
@@ -15,12 +22,17 @@ class _Entry:
     stop_event: Optional[threading.Event] = None
 
 
-class TaskRunner(ITaskRunner):
+class TaskRunner:
     """
     Background execution helper:
     - run(): one-shot
-    - stream(): producer yields many items (delivers only the latest)
-    - key/cancel_previous/drop_outdated: "latest wins" semantics
+    - stream(): producer yields many items
+        * coalesce=True  -> "latest wins": intermediate items may be dropped,
+                            only the most recent is delivered (good for UI frames)
+        * coalesce=False -> lossless: every item delivered in order via an
+                            unbounded queue drained on a dedicated consumer
+                            thread (good for control/message streams)
+    - key/cancel_previous/drop_outdated: "latest wins" task-supersession.
     """
 
     def __init__(self, executor: ThreadPoolExecutor) -> None:
@@ -117,6 +129,7 @@ class TaskRunner(ITaskRunner):
         key: Hashable | None = None,
         cancel_previous: bool = False,
         drop_outdated: bool = True,
+        coalesce: bool = True,
     ) -> StreamHandle:
         stop_event = threading.Event()
 
@@ -125,23 +138,49 @@ class TaskRunner(ITaskRunner):
                 key, cancel_previous=cancel_previous, new_stop_event=stop_event
             )
 
+        if coalesce:
+            loop = self._make_coalescing_loop(
+                producer, on_item, on_error, on_complete,
+                key, token, stop_event, drop_outdated,
+            )
+        else:
+            loop = self._make_lossless_loop(
+                producer, on_item, on_error, on_complete,
+                key, token, stop_event, drop_outdated,
+            )
+
+        fut: Future[None] = self._executor.submit(loop)
+
+        with self._lock:
+            self._set_entry(key, token, fut, stop_event=stop_event)
+
+        return StreamHandle(stop_event=stop_event, future=fut)
+
+    # ---------- stream strategies ----------
+
+    def _make_coalescing_loop(
+        self, producer, on_item, on_error, on_complete,
+        key, token, stop_event, drop_outdated,
+    ):
         latest_lock = threading.Lock()
-        latest: Optional[T] = None
+        latest = _NOTHING
         scheduled = False
 
         def flush_latest() -> None:
-            nonlocal scheduled
+            nonlocal scheduled, latest
             with self._lock:
                 if not self._is_latest(key, token, drop_outdated=drop_outdated):
-                    scheduled = False
+                    with latest_lock:
+                        scheduled = False
                     return
             with latest_lock:
                 value = latest
+                latest = _NOTHING
                 scheduled = False
-            if value is not None:
+            if value is not _NOTHING:
                 on_item(value)
 
-        def publish(item: T) -> None:
+        def publish(item) -> None:
             nonlocal latest, scheduled
             with latest_lock:
                 latest = item
@@ -166,12 +205,49 @@ class TaskRunner(ITaskRunner):
                 if on_complete is not None:
                     on_complete()
 
-        fut: Future[None] = self._executor.submit(loop)
+        return loop
 
-        with self._lock:
-            self._set_entry(key, token, fut, stop_event=stop_event)
+    def _make_lossless_loop(
+        self, producer, on_item, on_error, on_complete,
+        key, token, stop_event, drop_outdated,
+    ):
+        # Producer thread fills the queue; a consumer thread drains it and
+        # calls on_item for every item in order. Keeping on_item off the
+        # producer thread means a slow handler never blocks stdout reading.
+        q: queue.Queue = queue.Queue()
+        _DONE = object()
 
-        return StreamHandle(stop_event=stop_event, future=fut)
+        def consumer() -> None:
+            while True:
+                item = q.get()
+                if item is _DONE:
+                    return
+                with self._lock:
+                    if not self._is_latest(key, token, drop_outdated=drop_outdated):
+                        return
+                on_item(item)
+
+        def loop() -> None:
+            consumer_thread = threading.Thread(target=consumer, daemon=True)
+            consumer_thread.start()
+            try:
+                for item in producer(stop_event):
+                    if stop_event.is_set():
+                        break
+                    with self._lock:
+                        if not self._is_latest(key, token, drop_outdated=drop_outdated):
+                            break
+                    q.put(item)
+            except BaseException as e:
+                if on_error is not None:
+                    on_error(e)
+            finally:
+                q.put(_DONE)
+                consumer_thread.join()
+                if on_complete is not None:
+                    on_complete()
+
+        return loop
 
     def cancel(self, key: Hashable) -> bool:
         with self._lock:
@@ -180,7 +256,10 @@ class TaskRunner(ITaskRunner):
                 return False
             if entry.stop_event is not None:
                 entry.stop_event.set()
-            return entry.future.cancel()
+            cancelled = entry.future.cancel()
+        # A running stream can't be future.cancel()'d, but the stop_event will
+        # halt it; report success when we have a stop_event to signal with.
+        return cancelled or entry.stop_event is not None
 
     def cancel_all(self) -> None:
         with self._lock:
