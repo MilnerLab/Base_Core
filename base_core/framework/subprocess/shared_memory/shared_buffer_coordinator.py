@@ -36,6 +36,21 @@ class SharedBufferCoordinator:
         self._required_consumer_count = len(consumer_bits)
         self._next_item_id = 1
 
+    def reset(self) -> None:
+        """
+        Reset all slot states to FREE so the coordinator can grant initial
+        slots again after a subprocess restart.
+
+        _next_item_id is intentionally NOT reset: keeping it monotonically
+        increasing means any ItemAck messages in flight from before the
+        restart carry a stale item_id and are silently ignored.
+        """
+        for slot in self._slots:
+            slot.state = "FREE"
+            slot.item_id = None
+            slot.pending_consumers = 0
+            slot.acked_mask = 0
+
     def register_consumer(self, consumer_id: str) -> None:
         """
         Add a consumer dynamically.  Must be called before grant_initial_slots()

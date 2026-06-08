@@ -90,6 +90,10 @@ class SharedMemoryDeviceService(DeviceService):
             self._bus.subscribe(ItemAck, self._on_item_ack)
         )
 
+        # Reset coordinator so any stale slot state from a previous run is
+        # cleared before we hand out fresh grants.
+        self._coordinator.reset()
+
         # Tell the subprocess which shared memory segment to attach to.
         reply = self._endpoint.raw_request(
             ConfigureBuffer(spec=self._buffer.spec, buffer_id=self._buffer_id)
@@ -113,9 +117,9 @@ class SharedMemoryDeviceService(DeviceService):
     def stop(self) -> None:
         self._cleanup.clear()
         super().stop()
-        self._buffer.close()
-        if self._buffer.is_owner:
-            self._buffer.unlink()
+        # Buffer is NOT closed here — its lifetime spans subprocess restarts.
+        # Register buffer.close() / buffer.unlink() in ctx.lifecycle so it is
+        # cleaned up only when the application shuts down.
 
     def ack_slot(self, slot: int, item_id: int, consumer_id: str) -> None:
         """
