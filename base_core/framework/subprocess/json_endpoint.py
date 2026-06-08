@@ -5,7 +5,9 @@ import subprocess
 import threading
 import uuid
 from dataclasses import dataclass
-from typing import Any, Dict, Iterator, Mapping, Optional
+from typing import Iterator, Optional
+
+from messages import Message, MessageRegistry, Kind
 
 
 @dataclass
@@ -16,33 +18,34 @@ class _Pending:
 
 class JsonlSubprocessEndpoint:
     """
-    Generic, bidirectional JSONL endpoint for a subprocess.
+    Bidirectional JSONL endpoint for a subprocess (main-process side).
 
-    Protocol:
-      - command: {"kind": "command", "name": str, "id"?: str, "payload"?: {...}}
-      - reply:   {"kind": "reply", "reply_to": str, "ok": bool, "payload"?: {...}}
-      - event:   {"kind": "event", "name": str, "source"?: str, "payload"?: {...}}
+    Public surface speaks typed Message objects; a MessageRegistry handles
+    (de)serialization. The byte-level transport -- process lifecycle, the
+    write lock, request/reply correlation, and stdout line reading -- is kept
+    as private internals so message typing and transport stay decoupled.
 
-    This transport should only carry small messages and handles / metadata.
-    Large arrays belong in shared memory or another data plane.
+    Wire envelope (added/stripped here, not part of a Message's payload):
+      - command: {"kind":"command","name":str,"id"?:str,"payload":{...}}
+      - reply:   {"kind":"reply","reply_to":str,"ok":bool,"payload"?:{...}}
+      - event:   {"kind":"event","name":str,"source"?:str,"payload":{...}}
+
+    Only small control messages travel here; bulk data goes through shared
+    memory or another data plane.
     """
-
-    _VALID_KINDS = {"command", "reply", "event"}
 
     def __init__(
         self,
         argv: list[str],
+        registry: MessageRegistry,
         *,
         env: Optional[dict[str, str]] = None,
         merge_stderr_to_stdout: bool = False,
-        request_id_field: str = "id",
-        reply_to_field: str = "reply_to",
     ) -> None:
         self._argv = argv
+        self._registry = registry
         self._env = env
         self._merge_stderr = merge_stderr_to_stdout
-        self._request_id_field = request_id_field
-        self._reply_to_field = reply_to_field
 
         self._proc: Optional[subprocess.Popen[str]] = None
         self._write_lock = threading.Lock()
@@ -70,13 +73,14 @@ class JsonlSubprocessEndpoint:
 
     def stop(self) -> None:
         proc = self._proc
-        self._proc = None
 
         with self._pending_lock:
             for p in self._pending.values():
                 p.response = {"kind": "reply", "ok": False, "error": "endpoint stopped"}
                 p.event.set()
             self._pending.clear()
+
+        self._proc = None
 
         if proc is None:
             return
@@ -93,91 +97,39 @@ class JsonlSubprocessEndpoint:
 
     # ---------- sending ----------
 
-    def send(self, message: Dict[str, Any]) -> None:
-        self._validate_outgoing(message)
+    def send(self, message: Message) -> None:
+        """Fire-and-forget send of a command or event message."""
+        self._send_envelope(self._registry.envelope_for(message))
 
-        proc = self._proc
-        if proc is None or proc.stdin is None:
-            raise RuntimeError("Subprocess not running. Call start() first.")
-
-        line = json.dumps(message, separators=(",", ":")) + "\n"
-        with self._write_lock:
-            proc.stdin.write(line)
-            proc.stdin.flush()
-
-    def send_command(
-        self,
-        name: str,
-        payload: Optional[Mapping[str, Any]] = None,
-        *,
-        target: Optional[str] = None,
-    ) -> None:
-        msg: Dict[str, Any] = {
-            "kind": "command",
-            "name": name,
-            "payload": dict(payload or {}),
-        }
-        if target is not None:
-            msg["target"] = target
-        self.send(msg)
-
-    def request(self, message: Dict[str, Any], *, timeout_s: float = 2.0) -> dict:
+    def request(self, message: Message, *, timeout_s: float = 2.0) -> Optional[Message]:
         """
-        Sends a message with an id and waits for a response with reply_to == id.
+        Send a command and wait for its reply, returning the decoded reply
+        Message -- or None if the reply has no registered message type (e.g.
+        a bare ok/error reply). Use raw_request() when you need ok/error.
 
-        IMPORTANT:
-        - This requires that `produce(stop_event)` is currently being consumed,
-          otherwise nobody reads stdout.
-        - Do NOT call request() from inside the same worker thread that is running `produce`.
+        Requires that produce() is being consumed on another thread, and must
+        not be called from within that same thread.
         """
-        msg = dict(message)
-        msg.setdefault("kind", "command")
-        if "name" not in msg:
-            raise ValueError("request message must include 'name'")
+        if message.KIND != Kind.COMMAND:
+            raise ValueError("request() requires a command message.")
+        envelope = self._registry.envelope_for(message)
+        return self._registry.decode(self._request_envelope(envelope, timeout_s))
 
-        req_id = uuid.uuid4().hex
-        msg[self._request_id_field] = req_id
-
-        pending = _Pending(event=threading.Event())
-        with self._pending_lock:
-            self._pending[req_id] = pending
-
-        try:
-            self.send(msg)
-            if not pending.event.wait(timeout=timeout_s):
-                raise TimeoutError(f"Timed out waiting for reply_to={req_id}")
-            assert pending.response is not None
-            return pending.response
-        finally:
-            with self._pending_lock:
-                self._pending.pop(req_id, None)
-
-    def request_command(
-        self,
-        name: str,
-        payload: Optional[Mapping[str, Any]] = None,
-        *,
-        target: Optional[str] = None,
-        timeout_s: float = 2.0,
-    ) -> dict:
-        msg: Dict[str, Any] = {
-            "kind": "command",
-            "name": name,
-            "payload": dict(payload or {}),
-        }
-        if target is not None:
-            msg["target"] = target
-        return self.request(msg, timeout_s=timeout_s)
+    def raw_request(self, message: Message, *, timeout_s: float = 2.0) -> dict:
+        """Like request() but returns the raw reply envelope (ok/error/payload)."""
+        if message.KIND != Kind.COMMAND:
+            raise ValueError("raw_request() requires a command message.")
+        envelope = self._registry.envelope_for(message)
+        return self._request_envelope(envelope, timeout_s)
 
     # ---------- receiving ----------
 
-    def produce(self, stop: threading.Event, *, forward_responses: bool = False) -> Iterator[dict]:
+    def produce(self, stop: threading.Event) -> Iterator[Message]:
         """
-        Blocking generator that reads stdout and yields validated dict messages.
+        Blocking generator yielding decoded Message objects from the subprocess.
 
-        - Reply messages are routed to pending requests and by default NOT yielded.
-        - Event messages are yielded normally.
-        - Any malformed / non-protocol messages are ignored.
+        Replies are routed to pending requests and not yielded. Unknown or
+        malformed lines are skipped.
         """
         proc = self._proc
         if proc is None or proc.stdout is None:
@@ -192,65 +144,60 @@ class JsonlSubprocessEndpoint:
                 continue
 
             try:
-                msg = json.loads(line)
+                envelope = json.loads(line)
             except json.JSONDecodeError:
                 continue
 
-            if not self._is_valid_incoming(msg):
+            if not isinstance(envelope, dict):
                 continue
 
-            reply_to = msg.get(self._reply_to_field)
+            # Route replies to waiting requests; do not yield them.
+            reply_to = envelope.get("reply_to")
             if isinstance(reply_to, str):
                 with self._pending_lock:
                     pending = self._pending.get(reply_to)
                 if pending is not None:
-                    pending.response = msg
+                    pending.response = envelope
                     pending.event.set()
-                    if not forward_responses:
-                        continue
+                    continue
 
-            yield msg
+            msg = self._registry.decode(envelope)
+            if msg is not None:
+                yield msg
 
+        # stdout closed: fail any outstanding requests.
         with self._pending_lock:
             for p in self._pending.values():
                 p.response = {"kind": "reply", "ok": False, "error": "stdout closed"}
                 p.event.set()
             self._pending.clear()
 
-    # ---------- validation ----------
+    # ---------- internals: raw transport ----------
 
-    def _validate_outgoing(self, message: Mapping[str, Any]) -> None:
-        kind = message.get("kind")
-        if kind not in self._VALID_KINDS:
-            raise ValueError("message must include kind in {'command', 'reply', 'event'}")
+    def _send_envelope(self, envelope: dict) -> None:
+        proc = self._proc
+        if proc is None or proc.stdin is None:
+            raise RuntimeError("Subprocess not running. Call start() first.")
+        line = json.dumps(envelope, separators=(",", ":")) + "\n"
+        with self._write_lock:
+            proc.stdin.write(line)
+            proc.stdin.flush()
 
-        if kind in {"command", "event"} and not isinstance(message.get("name"), str):
-            raise ValueError("command/event message must include string field 'name'")
+    def _request_envelope(self, envelope: dict, timeout_s: float) -> dict:
+        req_id = uuid.uuid4().hex
+        envelope = dict(envelope)
+        envelope["id"] = req_id
 
-        payload = message.get("payload")
-        if payload is not None and not isinstance(payload, dict):
-            raise ValueError("payload must be a dict when present")
+        pending = _Pending(event=threading.Event())
+        with self._pending_lock:
+            self._pending[req_id] = pending
 
-        if kind == "reply" and not isinstance(message.get(self._reply_to_field), str):
-            # Allow replies without reply_to only in the internal stop path, not on send().
-            raise ValueError("reply message must include string field 'reply_to'")
-
-    def _is_valid_incoming(self, message: object) -> bool:
-        if not isinstance(message, dict):
-            return False
-
-        kind = message.get("kind")
-        if kind not in self._VALID_KINDS:
-            return False
-
-        if kind in {"command", "event"} and not isinstance(message.get("name"), str):
-            return False
-
-        payload = message.get("payload")
-        if payload is not None and not isinstance(payload, dict):
-            return False
-
-        if kind == "reply" and not isinstance(message.get(self._reply_to_field), str):
-            return False
-
-        return True
+        try:
+            self._send_envelope(envelope)
+            if not pending.event.wait(timeout=timeout_s):
+                raise TimeoutError(f"Timed out waiting for reply_to={req_id}")
+            assert pending.response is not None
+            return pending.response
+        finally:
+            with self._pending_lock:
+                self._pending.pop(req_id, None)

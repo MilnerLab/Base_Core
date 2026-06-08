@@ -1,44 +1,77 @@
 from __future__ import annotations
 
-from collections import defaultdict
-from dataclasses import dataclass
-from typing import Callable, DefaultDict, Generic, TypeVar
+import logging
 import threading
+from collections import defaultdict
+from typing import Callable, DefaultDict, Optional, TypeVar
+
+log = logging.getLogger(__name__)
 
 TEvent = TypeVar("TEvent")
 
 
-@dataclass()
 class EventBus:
-    def __post_init__(self) -> None:
+    """
+    Synchronous, type-dispatched, in-process event bus.
+
+    Handlers are invoked on the thread that calls publish(). Keep them fast and
+    non-blocking; for slow work, hand off to an executor inside the handler.
+
+    Dispatch is by the event's concrete type (exact match). Optionally a
+    subscription can be scoped to a `source`, so that with a single bus shared
+    by multiple devices, a handler only sees events whose `.source` matches.
+    Events without a `source` attribute are delivered only to unscoped handlers.
+    """
+
+    def __init__(self) -> None:
         self._lock = threading.RLock()
-        self._subs: DefaultDict[type, list[Callable[[object], None]]] = defaultdict(list)
+        # event_type -> list of (handler, source_or_None)
+        self._subs: DefaultDict[
+            type, list[tuple[Callable[..., None], Optional[str]]]
+        ] = defaultdict(list)
 
     def subscribe(
         self,
         event_type: type[TEvent],
         handler: Callable[[TEvent], None],
+        *,
+        source: Optional[str] = None,
     ) -> Callable[[], None]:
+        """
+        Register `handler` for events of exactly `event_type`.
+
+        If `source` is given, the handler only fires for events whose `.source`
+        equals it. If `source` is None, the handler fires for every event of
+        that type regardless of source.
+        """
+        entry = (handler, source)
         with self._lock:
-            handlers = self._subs[event_type]
-            handlers.append(handler)  # type: ignore[arg-type]
+            self._subs[event_type].append(entry)
 
         def unsubscribe() -> None:
             with self._lock:
-                handlers = self._subs.get(event_type, [])
-                if handler in handlers:
-                    handlers.remove(handler)  # type: ignore[arg-type]
+                handlers = self._subs.get(event_type)
+                if handlers and entry in handlers:
+                    handlers.remove(entry)
+                    if not handlers:
+                        del self._subs[event_type]
 
         return unsubscribe
 
     def publish(self, event: object) -> None:
-        event_type = type(event)
-
         with self._lock:
-            handlers = list(self._subs.get(event_type, []))
+            entries = list(self._subs.get(type(event), []))
 
-        for handler in handlers:
+        event_source = getattr(event, "source", None)
+
+        for handler, want_source in entries:
+            if want_source is not None and want_source != event_source:
+                continue
             try:
                 handler(event)
             except Exception:
-                pass
+                log.exception(
+                    "EventBus handler %r failed for event %s",
+                    getattr(handler, "__qualname__", handler),
+                    type(event).__name__,
+                )

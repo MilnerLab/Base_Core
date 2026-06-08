@@ -2,37 +2,39 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import Future
-from typing import Any, Callable, Dict, Mapping, Optional
+from typing import Callable, Optional
 
-from base_core.framework.concurrency.interfaces import ITaskRunner
 from base_core.framework.concurrency.models import StreamHandle
-from base_core.framework.subprocess.json_endpoint import JsonlSubprocessEndpoint
-
-
-EventHandler = Callable[[dict], None]
+from base_core.framework.concurrency.task_runner import TaskRunner
+from json_endpoint import JsonlSubprocessEndpoint
+from messages import Message
+from events.event_bus import EventBus
 
 
 class DeviceService:
     """
-    Main-process wrapper around a subprocess endpoint.
+    Main-process wrapper around one subprocess endpoint.
 
-    Responsibilities:
-      - own the JSON transport lifecycle
-      - dispatch incoming protocol events to local handlers
-      - expose command / request helpers
+    Owns the transport lifecycle, pumps decoded inbound messages onto the
+    shared EventBus, and exposes typed send / request helpers. Routing of
+    inbound messages is the bus's job: subscribe to message types (optionally
+    scoped by source) rather than registering name-keyed callbacks here.
 
-    This class intentionally does NOT know how large data is stored.
-    Event payloads should only carry handles / metadata.
+    Knows nothing about how large data is stored; messages carry only handles
+    and metadata.
     """
 
-    def __init__(self, io: ITaskRunner, endpoint: JsonlSubprocessEndpoint) -> None:
+    def __init__(
+        self,
+        io: TaskRunner,
+        endpoint: JsonlSubprocessEndpoint,
+        bus: EventBus,
+    ) -> None:
         self._io = io
         self._endpoint = endpoint
+        self._bus = bus
         self._handle: Optional[StreamHandle] = None
         self._lock = threading.RLock()
-
-        # event routing by event name
-        self._event_handlers: Dict[str, EventHandler] = {}
 
     # ---------- lifecycle ----------
 
@@ -40,20 +42,16 @@ class DeviceService:
         with self._lock:
             if self._handle is not None:
                 return
-
             self._endpoint.start()
-
-            def producer(stop: threading.Event):
-                yield from self._endpoint.produce(stop)
-
             self._handle = self._io.stream(
-                producer,
-                on_item=self._on_stream_message,
+                self._endpoint.produce,
+                on_item=self._bus.publish,
                 on_error=self._on_stream_error,
                 on_complete=self._on_stream_complete,
                 key="device.stream",
                 cancel_previous=True,
                 drop_outdated=True,
+                coalesce=False,
             )
 
     def stop(self) -> None:
@@ -64,71 +62,30 @@ class DeviceService:
             if handle is not None:
                 handle.stop()
 
-    # ---------- event routing ----------
+    # ---------- control API ----------
 
-    def register_event_handler(self, event_name: str, handler: EventHandler) -> None:
-        """
-        Register a handler for messages where:
-          msg.get("kind") == "event" and msg.get("name") == event_name
-
-        NOTE: Handlers are called in the stream worker thread.
-        Keep them fast (store data + signal/UI dispatch), do not block.
-        """
-        with self._lock:
-            self._event_handlers[event_name] = handler
-
-    def unregister_event_handler(self, event_name: str) -> None:
-        with self._lock:
-            self._event_handlers.pop(event_name, None)
-
-    def clear_event_handlers(self) -> None:
-        with self._lock:
-            self._event_handlers.clear()
-
-    # Backward-compatible convenience names
-    def register_handler(self, msg_type: str, handler: EventHandler) -> None:
-        self.register_event_handler(msg_type, handler)
-
-    def unregister_handler(self, msg_type: str) -> None:
-        self.unregister_event_handler(msg_type)
-
-    def clear_handlers(self) -> None:
-        self.clear_event_handlers()
-
-    # ---------- Control API ----------
-
-    def send(self, msg: dict) -> None:
+    def send(self, message: Message) -> None:
+        """Fire-and-forget command/event to the subprocess."""
         with self._lock:
             self._ensure_running()
-            self._endpoint.send(msg)
-
-    def send_command(
-        self,
-        name: str,
-        payload: Optional[Mapping[str, Any]] = None,
-        *,
-        target: Optional[str] = None,
-    ) -> None:
-        with self._lock:
-            self._ensure_running()
-            self._endpoint.send_command(name, payload, target=target)
+            self._endpoint.send(message)
 
     def request_async(
         self,
-        msg: dict,
+        message: Message,
         *,
         timeout_s: float = 2.0,
         key: str = "device.control.request",
         cancel_previous: bool = False,
         drop_outdated: bool = True,
-        on_success: Optional[Callable[[dict], None]] = None,
+        on_success: Optional[Callable[[Optional[Message]], None]] = None,
         on_error: Optional[Callable[[BaseException], None]] = None,
-    ) -> Future[dict]:
+    ) -> Future:
+        """Send a command and resolve with the decoded reply Message (or None)."""
         with self._lock:
             self._ensure_running()
-
         return self._io.run(
-            lambda: self._endpoint.request(msg, timeout_s=timeout_s),
+            lambda: self._endpoint.request(message, timeout_s=timeout_s),
             on_success=on_success,
             on_error=on_error,
             key=key,
@@ -136,57 +93,13 @@ class DeviceService:
             drop_outdated=drop_outdated,
         )
 
-    def request_command_async(
-        self,
-        name: str,
-        payload: Optional[Mapping[str, Any]] = None,
-        *,
-        target: Optional[str] = None,
-        timeout_s: float = 2.0,
-        key: str = "device.control.request",
-        cancel_previous: bool = False,
-        drop_outdated: bool = True,
-        on_success: Optional[Callable[[dict], None]] = None,
-        on_error: Optional[Callable[[BaseException], None]] = None,
-    ) -> Future[dict]:
-        with self._lock:
-            self._ensure_running()
-
-        return self._io.run(
-            lambda: self._endpoint.request_command(
-                name,
-                payload,
-                target=target,
-                timeout_s=timeout_s,
-            ),
-            on_success=on_success,
-            on_error=on_error,
-            key=key,
-            cancel_previous=cancel_previous,
-            drop_outdated=drop_outdated,
-        )
-
-    # ---------- Stream callbacks ----------
-
-    def _on_stream_message(self, msg: dict) -> None:
-        kind = msg.get("kind")
-        name = msg.get("name")
-        if kind != "event" or not isinstance(name, str):
-            return
-
-        with self._lock:
-            handler = self._event_handlers.get(name)
-
-        if handler is not None:
-            handler(msg)
+    # ---------- stream callbacks ----------
 
     def _on_stream_error(self, e: BaseException) -> None:
         self.stop()
-        print("Stream error:", e)
 
     def _on_stream_complete(self) -> None:
         self.stop()
-        print("Stream complete")
 
     # ---------- helpers ----------
 

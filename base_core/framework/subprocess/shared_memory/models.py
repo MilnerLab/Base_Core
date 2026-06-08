@@ -1,48 +1,55 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
-from typing import Any
+from typing import Any, Literal
 import json
 import struct
-from typing_extensions import Literal
 
+from base_core.framework.serialization.serde import Primitive, PrimitiveSerde
 import numpy as np
+
 
 
 # ---------------------------------------------------------------------
 # Slot header
 # ---------------------------------------------------------------------
 # Layout per slot:
-#   uint64 frame_id
+#   uint64 item_id
 #   uint64 timestamp_ns
 #   uint32 payload_nbytes
 #   uint32 reserved
 #
 # Keep this small and fixed-size.
 # The coordinator-specific state (FREE / PUBLISHED / pending_consumers / etc.)
-# should stay in the main process, not in shared memory.
+# lives in the main process, NOT in shared memory.
 _SLOT_HEADER_STRUCT = struct.Struct("<Q Q I I")
 
+
 @dataclass(frozen=True)
-class FrameDescriptor:
+class ItemDescriptor:
+    """Identifies a single item written into a particular slot."""
     slot: int = 0
-    frame_id: int = 0
+    item_id: int = 0
     timestamp_ns: int = 0
+
 
 @dataclass(frozen=True)
 class SlotHeader:
-    frame_descriptor: FrameDescriptor
+    """The fixed-size header physically stored at the front of each slot."""
+    item_id: int = 0
+    timestamp_ns: int = 0
+    payload_nbytes: int = 0
 
     @classmethod
     def empty(cls) -> "SlotHeader":
-        return cls(frame_descriptor=FrameDescriptor())
+        return cls()
 
 
 # ---------------------------------------------------------------------
 # Shared memory metadata / startup info
 # ---------------------------------------------------------------------
 @dataclass(frozen=True)
-class SharedRingBufferSpec:
+class SharedRingBufferSpec(PrimitiveSerde):
     name: str
     slot_count: int
     shape: tuple[int, ...]
@@ -90,6 +97,14 @@ class SharedRingBufferSpec:
     def from_json(cls, raw: str) -> "SharedRingBufferSpec":
         return cls.from_dict(json.loads(raw))
 
+    # PrimitiveSerde: spec travels over the wire inside ConfigureBuffer.
+    def to_primitive(self) -> Primitive:
+        return self.to_dict()
+
+    @classmethod
+    def from_primitive(cls, v: Primitive) -> "SharedRingBufferSpec":
+        return cls.from_dict(v)
+
     @classmethod
     def build(
         cls,
@@ -114,12 +129,13 @@ class SharedRingBufferSpec:
             slot_size=slot_size,
         )
 
+
 SlotState = Literal["FREE", "WRITING", "PUBLISHED"]
 
 
 @dataclass
 class SlotInfo:
     state: SlotState = "FREE"
-    frame_id: int | None = None
+    item_id: int | None = None
     pending_consumers: int = 0
     acked_mask: int = 0
