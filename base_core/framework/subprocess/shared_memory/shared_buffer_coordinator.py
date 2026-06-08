@@ -36,6 +36,21 @@ class SharedBufferCoordinator:
         self._required_consumer_count = len(consumer_bits)
         self._next_item_id = 1
 
+    def register_consumer(self, consumer_id: str) -> None:
+        """
+        Add a consumer dynamically.  Must be called before grant_initial_slots()
+        (i.e., during the DI register() phase, before any on_startup() runs).
+        """
+        if consumer_id in self._consumer_bits:
+            raise ValueError(f"Consumer {consumer_id!r} is already registered.")
+        if any(s.state != "FREE" for s in self._slots):
+            raise RuntimeError(
+                f"Cannot register consumer {consumer_id!r}: slots already in flight."
+            )
+        bit = 1 << len(self._consumer_bits)
+        self._consumer_bits[consumer_id] = bit
+        self._required_consumer_count += 1
+
     def grant_initial_slots(self) -> list[dict]:
         out: list[dict] = []
         for slot in range(len(self._slots)):

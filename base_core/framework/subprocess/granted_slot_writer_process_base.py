@@ -5,7 +5,11 @@ import threading
 import time
 from typing import Generic, TypeVar
 
-from base_core.framework.subprocess.shared_memory.base_protocol import ConfigureBuffer, ItemWritten, SlotGranted
+from base_core.framework.subprocess.shared_memory.base_protocol import (
+    ConfigureBuffer,
+    ItemWritten,
+    SlotGranted,
+)
 from json_process_base import JsonlStdioAppBase
 from messages import MessageRegistry
 from base_core.framework.subprocess.shared_memory.models import (
@@ -29,11 +33,21 @@ class GrantedSlotWriterProcessBase(
     Speaks the shared-memory slot lifecycle (ConfigureBuffer / SlotGranted /
     ItemWritten). Subclasses provide a registry (base_registry().extend(...))
     and implement attach_buffer / acquire_measurement / write_measurement_to_slot.
+
+    `buffer_id` must match the value the main process uses in ConfigureBuffer
+    and SlotGranted.  Defaults to "" for subprocesses with a single output buffer.
     """
 
-    def __init__(self, registry: MessageRegistry, *, source: str) -> None:
+    def __init__(
+        self,
+        registry: MessageRegistry,
+        *,
+        source: str,
+        buffer_id: str = "",
+    ) -> None:
         super().__init__(registry, source=source)
 
+        self._buffer_id = buffer_id
         self._buffer: TBuffer | None = None
         self._buffer_spec: SharedRingBufferSpec | None = None
         self._configured = threading.Event()
@@ -91,6 +105,8 @@ class GrantedSlotWriterProcessBase(
     # Command handlers
     # ------------------------------------------------------------------
     def _handle_configure(self, msg: ConfigureBuffer, envelope: dict) -> None:
+        if msg.buffer_id != self._buffer_id:
+            return
         self._buffer_spec = msg.spec
         self._buffer = self.attach_buffer(msg.spec)
         self._configured.set()
@@ -98,6 +114,8 @@ class GrantedSlotWriterProcessBase(
         self.reply_ok(envelope)
 
     def _handle_slot_granted(self, msg: SlotGranted, envelope: dict) -> None:
+        if msg.buffer_id != self._buffer_id:
+            return
         item = ItemDescriptor(slot=msg.slot, item_id=msg.item_id, timestamp_ns=0)
         with self._grants_lock:
             if msg.slot in self._live_slots:
@@ -162,5 +180,6 @@ class GrantedSlotWriterProcessBase(
                     slot=item.slot,
                     item_id=item.item_id,
                     timestamp_ns=item.timestamp_ns,
+                    buffer_id=self._buffer_id,
                 )
             )

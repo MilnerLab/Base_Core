@@ -117,9 +117,9 @@ class SharedRingBuffer:
     def read_header(self, slot: int) -> SlotHeader:
         start, end = self._header_range(slot)
         raw = self._shm.buf[start:end]
-        frame_id, timestamp_ns, payload_nbytes, _reserved = _SLOT_HEADER_STRUCT.unpack(raw)
+        item_id, timestamp_ns, payload_nbytes, _reserved = _SLOT_HEADER_STRUCT.unpack(raw)
         return SlotHeader(
-            frame_id=frame_id,
+            item_id=item_id,
             timestamp_ns=timestamp_ns,
             payload_nbytes=payload_nbytes,
         )
@@ -133,7 +133,7 @@ class SharedRingBuffer:
 
         start, end = self._header_range(slot)
         packed = _SLOT_HEADER_STRUCT.pack(
-            int(header.frame_id),
+            int(header.item_id),
             int(header.timestamp_ns),
             int(header.payload_nbytes),
             0,  # reserved
@@ -162,7 +162,7 @@ class SharedRingBuffer:
         *,
         slot: int,
         frame: np.ndarray,
-        frame_id: int,
+        item_id: int,
         timestamp_ns: int,
     ) -> None:
         """
@@ -193,7 +193,7 @@ class SharedRingBuffer:
         self.write_header(
             slot,
             SlotHeader(
-                frame_id=frame_id,
+                item_id=item_id,
                 timestamp_ns=timestamp_ns,
                 payload_nbytes=self.spec.slot_payload_size,
             ),

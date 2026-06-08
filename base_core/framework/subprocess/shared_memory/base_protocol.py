@@ -7,69 +7,83 @@ from base_core.framework.subprocess.shared_memory.models import SharedRingBuffer
 
 
 # =====================================================================
-# Base protocol
+# Base shared-memory slot protocol
 # =====================================================================
-# These messages are device-independent. Two tiers of subprocess use them:
-#
-#   - A plain JSON subprocess uses only the lifecycle/control messages it
-#     needs (it may use none of the shared-memory ones).
-#   - A shared-memory writer subprocess uses the slot-lifecycle messages
-#     (ConfigureBuffer / SlotGranted / ItemWritten / ItemAck).
-#
-# A concrete device builds its registry by extending the base:
-#
-#       from proto.base_protocol import base_registry
-#       registry = base_registry().extend(SetGain, StartSweep)
-#
-# so the base lifecycle messages are shared while each device keeps its own
-# messages isolated from every other device.
+# All messages carry a `buffer_id` so a single subprocess can own more
+# than one buffer (e.g. an analysis subprocess that reads from an input
+# buffer AND writes to an output buffer).  The empty string "" is the
+# default for subprocesses that have exactly one buffer.
 # =====================================================================
 
 
-# ----- shared-memory slot lifecycle -----
+# ----- main → subprocess (commands) -----
 
 @dataclass(frozen=True)
 class ConfigureBuffer(Message):
-    """main -> subprocess (request): attach this shared buffer."""
+    """Attach to the shared buffer identified by buffer_id."""
     NAME = "configure_buffer"
     KIND = Kind.COMMAND
     spec: SharedRingBufferSpec
+    buffer_id: str = ""
 
 
 @dataclass(frozen=True)
 class SlotGranted(Message):
-    """main -> subprocess: you may write this slot now."""
+    """You may write this slot in the output buffer."""
     NAME = "slot_granted"
     KIND = Kind.COMMAND
     slot: int
     item_id: int
+    buffer_id: str = ""
 
 
 @dataclass(frozen=True)
+class ItemAvailable(Message):
+    """A slot in an input buffer is ready for you to read."""
+    NAME = "item_available"
+    KIND = Kind.COMMAND
+    consumer_id: str
+    slot: int
+    item_id: int
+    timestamp_ns: int
+    buffer_id: str = ""
+
+
+# ----- subprocess → main (events) -----
+
+@dataclass(frozen=True)
 class ItemWritten(Message):
-    """subprocess -> main (event): slot has been written, publish it."""
+    """Slot has been written; main process may publish it to consumers."""
     NAME = "item_written"
     KIND = Kind.EVENT
     slot: int
     item_id: int
     timestamp_ns: int
+    buffer_id: str = ""
 
 
 @dataclass(frozen=True)
 class ItemAck(Message):
-    """consumer -> main (event): this item is done being read."""
+    """Consumer is done reading this slot."""
     NAME = "item_ack"
     KIND = Kind.EVENT
     slot: int
     item_id: int
     consumer_id: str
+    buffer_id: str = ""
 
 
-# The base message classes, grouped so a device can pull in just what it needs.
-SHARED_MEMORY_MESSAGES = (ConfigureBuffer, SlotGranted, ItemWritten, ItemAck)
-BASE_MESSAGES = SHARED_MEMORY_MESSAGES
+# ---- registry helpers ----
+
+SHARED_MEMORY_MESSAGES = (
+    ConfigureBuffer,
+    SlotGranted,
+    ItemAvailable,
+    ItemWritten,
+    ItemAck,
+)
 
 
 def base_registry() -> MessageRegistry:
-    """A fresh registry preloaded with the base protocol messages."""
-    return MessageRegistry().register(*BASE_MESSAGES)
+    """Fresh registry preloaded with all base shared-memory protocol messages."""
+    return MessageRegistry().register(*SHARED_MEMORY_MESSAGES)
