@@ -8,9 +8,9 @@ from typing import Any, Callable, Optional, Type
 from messages import Message, MessageRegistry, Kind
 
 
-# A handler receives the decoded command message plus the raw envelope (so it
-# can read the request id for replies). It returns an optional reply payload.
-CommandHandler = Callable[["Message", dict], None]
+# A handler receives the decoded message and the request id (str) or None if
+# the command was fire-and-forget.  Call reply_ok / reply_error with that id.
+CommandHandler = Callable[["Message", "str | None"], None]
 
 
 class JsonlStdioAppBase:
@@ -56,11 +56,11 @@ class JsonlStdioAppBase:
             envelope["source"] = self._source
         self._write(envelope)
 
-    def reply_ok(self, request_envelope: dict, payload: Optional[dict] = None) -> None:
-        self._reply(request_envelope, {"ok": True, "payload": dict(payload or {})})
+    def reply_ok(self, request_id: Optional[str], payload: Optional[dict] = None) -> None:
+        self._reply(request_id, {"ok": True, "payload": dict(payload or {})})
 
-    def reply_error(self, request_envelope: dict, error: str) -> None:
-        self._reply(request_envelope, {"ok": False, "error": error})
+    def reply_error(self, request_id: Optional[str], error: str) -> None:
+        self._reply(request_id, {"ok": False, "error": error})
 
     # ----- main work (override) -----
 
@@ -89,11 +89,10 @@ class JsonlStdioAppBase:
             sys.stdout.write(line)
             sys.stdout.flush()
 
-    def _reply(self, request_envelope: dict, body: dict) -> None:
+    def _reply(self, request_id: Optional[str], body: dict) -> None:
         out = {"kind": Kind.REPLY, **body}
-        req_id = request_envelope.get("id")
-        if isinstance(req_id, str):
-            out["reply_to"] = req_id
+        if isinstance(request_id, str):
+            out["reply_to"] = request_id
         if self._source is not None:
             out["source"] = self._source
         self._write(out)
@@ -118,17 +117,18 @@ class JsonlStdioAppBase:
     def _dispatch(self, envelope: dict) -> None:
         if envelope.get("kind") != Kind.COMMAND:
             return
+        raw_id = envelope.get("id")
+        request_id: Optional[str] = raw_id if isinstance(raw_id, str) else None
         message = self._registry.decode(envelope)
         if message is None:
-            # Unknown/unregistered command. Reply with an error if it had an id.
-            if isinstance(envelope.get("id"), str):
-                self.reply_error(envelope, f"Unknown command: {envelope.get('name')}")
+            if request_id is not None:
+                self.reply_error(request_id, f"Unknown command: {envelope.get('name')}")
             return
         handler = self._handlers.get(type(message))
         if handler is None:
-            self.reply_error(envelope, f"No handler for {type(message).__name__}")
+            self.reply_error(request_id, f"No handler for {type(message).__name__}")
             return
         try:
-            handler(message, envelope)
+            handler(message, request_id)
         except Exception as exc:  # noqa: BLE001
-            self.reply_error(envelope, str(exc))
+            self.reply_error(request_id, str(exc))

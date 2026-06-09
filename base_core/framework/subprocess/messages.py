@@ -36,14 +36,17 @@ class Message:
     KIND: ClassVar[str] = ""  # one of Kind.*
 
     # Envelope-level metadata, NOT part of the protocol payload. Populated by
-    # the registry on decode from the wire envelope's "source" field. Excluded
-    # from equality so two messages with identical payloads compare equal
-    # regardless of which device they came from.
+    # the registry on decode from the wire envelope's "source"/"target" fields.
+    # Excluded from equality so two messages with identical payloads compare
+    # equal regardless of routing metadata.
     source: Optional[str] = field(default=None, compare=False, kw_only=True)
+    # target: which worker within a SubprocessApp should receive this command.
+    # Set by WorkerHandle.send() / WorkerHandle.request_async() before sending.
+    target: Optional[str] = field(default=None, compare=False, kw_only=True)
 
     def _payload_fields(self):
-        # All dataclass fields except the envelope-level `source`.
-        return [f for f in fields(self) if f.name != "source"]
+        # All dataclass fields except envelope-level routing metadata.
+        return [f for f in fields(self) if f.name not in ("source", "target")]
 
     def to_payload(self) -> dict[str, Primitive]:
         out: dict[str, Primitive] = {}
@@ -56,7 +59,7 @@ class Message:
         hints = _resolved_hints(cls)
         kwargs: dict[str, Any] = {}
         for f in fields(cls):
-            if f.name == "source":
+            if f.name in ("source", "target"):
                 continue  # comes from the envelope, not the payload
             if f.name not in payload:
                 if f.default is MISSING and f.default_factory is MISSING:  # type: ignore[misc]
@@ -157,12 +160,18 @@ class MessageRegistry:
         src = envelope.get("source")
         if isinstance(src, str):
             object.__setattr__(msg, "source", src)  # frozen dataclass
+        tgt = envelope.get("target")
+        if isinstance(tgt, str):
+            object.__setattr__(msg, "target", tgt)  # frozen dataclass
         return msg
 
     def envelope_for(self, msg: Message) -> dict[str, Any]:
         """Turn a typed Message into the wire envelope (sans id/reply_to)."""
-        return {
+        out: dict[str, Any] = {
             "kind": msg.KIND,
             "name": msg.NAME,
             "payload": msg.to_payload(),
         }
+        if msg.target is not None:
+            out["target"] = msg.target
+        return out

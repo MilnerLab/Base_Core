@@ -70,6 +70,16 @@ class DeviceService:
             self._ensure_running()
             self._endpoint.send(message)
 
+    def request_sync(self, message: Message, *, timeout_s: float = 2.0) -> dict:
+        """
+        Synchronous blocking request/reply, returning the raw envelope dict.
+        For startup/setup sequences that need confirmation before proceeding.
+        Must NOT be called from the EventBus / TaskRunner stream thread.
+        """
+        with self._lock:
+            self._ensure_running()
+        return self._endpoint.raw_request(message, timeout_s=timeout_s)
+
     def request_async(
         self,
         message: Message,

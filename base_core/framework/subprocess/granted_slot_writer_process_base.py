@@ -104,16 +104,16 @@ class GrantedSlotWriterProcessBase(
     # ------------------------------------------------------------------
     # Command handlers
     # ------------------------------------------------------------------
-    def _handle_configure(self, msg: ConfigureBuffer, envelope: dict) -> None:
+    def _handle_configure(self, msg: ConfigureBuffer, request_id: str | None) -> None:
         if msg.buffer_id != self._buffer_id:
             return
         self._buffer_spec = msg.spec
         self._buffer = self.attach_buffer(msg.spec)
         self._configured.set()
         self.on_buffer_configured()
-        self.reply_ok(envelope)
+        self.reply_ok(request_id)
 
-    def _handle_slot_granted(self, msg: SlotGranted, envelope: dict) -> None:
+    def _handle_slot_granted(self, msg: SlotGranted, request_id: str | None) -> None:
         if msg.buffer_id != self._buffer_id:
             return
         item = ItemDescriptor(slot=msg.slot, item_id=msg.item_id, timestamp_ns=0)
@@ -124,7 +124,7 @@ class GrantedSlotWriterProcessBase(
             self._granted_slots.append(item)
             self._grants_available.set()
         self.on_slot_granted(item)
-        self.reply_ok(envelope)
+        self.reply_ok(request_id)
 
     # ------------------------------------------------------------------
     # Grant queue helpers
