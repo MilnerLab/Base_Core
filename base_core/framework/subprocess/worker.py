@@ -22,6 +22,9 @@ from messages import Message
 
 TBuffer = TypeVar("TBuffer")
 TData = TypeVar("TData")
+TInputBuffer = TypeVar("TInputBuffer")
+TOutputBuffer = TypeVar("TOutputBuffer")
+TOutputData = TypeVar("TOutputData")
 
 
 def _not_attached(*_args: Any, **_kwargs: Any) -> None:
@@ -215,7 +218,7 @@ class ProducerWorker(Worker, ABC, Generic[TBuffer, TData]):
     """
     Worker that continuously acquires data and writes to a shared ring buffer.
 
-    Handles ConfigureBuffer and SlotGranted (sent by OutputBufferHandle on startup).
+    Handles ConfigureBuffer and SlotGranted (sent by WorkerHandle on startup).
     After receiving the first SlotGranted, enters the acquire → write → emit loop.
     """
 
@@ -339,7 +342,7 @@ class ConsumerWorker(Worker, ABC, Generic[TBuffer]):
     Worker that reads from a single input shared-memory buffer.
 
     Handles ConfigureBuffer (to attach the input buffer) and ItemAvailable
-    (forwarded by InputBufferHandle on the main process side).
+    (forwarded by WorkerHandle on the main process side).
     Subclass implements on_item() to do computation and must call ack() when done.
 
     For a worker that reads multiple input buffers, see ProcessorWorker.
@@ -418,7 +421,7 @@ class ConsumerWorker(Worker, ABC, Generic[TBuffer]):
 # ProcessorWorker
 # ---------------------------------------------------------------------------
 
-class ProcessorWorker(Worker, ABC):
+class ProcessorWorker(Worker, ABC, Generic[TInputBuffer, TOutputBuffer, TOutputData]):
     """
     Worker that reads from multiple input shared-memory buffers and writes to
     one output buffer.
@@ -440,8 +443,8 @@ class ProcessorWorker(Worker, ABC):
 
     def __init__(self) -> None:
         super().__init__()
-        self._input_buffers: dict[str, Any] = {}
-        self._output_buffer: Optional[Any] = None
+        self._input_buffers: dict[str, TInputBuffer] = {}
+        self._output_buffer: Optional[TOutputBuffer] = None
         self._pending: dict[str, ItemAvailable] = {}
         self._item_event = threading.Event()
         self._grants_lock = threading.Lock()
@@ -464,13 +467,13 @@ class ProcessorWorker(Worker, ABC):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def attach_input_buffer(self, buffer_id: str, spec: SharedRingBufferSpec) -> Any: ...
+    def attach_input_buffer(self, buffer_id: str, spec: SharedRingBufferSpec) -> TInputBuffer: ...
 
     @abstractmethod
-    def attach_output_buffer(self, spec: SharedRingBufferSpec) -> Any: ...
+    def attach_output_buffer(self, spec: SharedRingBufferSpec) -> TOutputBuffer: ...
 
     @abstractmethod
-    def write_to_slot(self, *, data: Any, item: ItemDescriptor) -> None: ...
+    def write_to_slot(self, *, data: TOutputData, item: ItemDescriptor) -> None: ...
 
     def _inputs_ready(self) -> bool:
         """Return True when the worker has enough pending inputs to process.
@@ -478,7 +481,7 @@ class ProcessorWorker(Worker, ABC):
         return all(bid in self._pending for bid in self.input_buffer_ids)
 
     @abstractmethod
-    def process(self, pending: dict[str, ItemAvailable]) -> Any:
+    def process(self, pending: dict[str, ItemAvailable]) -> Optional[TOutputData]:
         """
         Perform computation. Return output data to write to the output slot,
         or None to skip writing. Must call self.ack_input() for each consumed slot.

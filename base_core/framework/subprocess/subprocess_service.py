@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import Future
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from base_core.framework.concurrency.models import StreamHandle
 from base_core.framework.concurrency.task_runner import TaskRunner
@@ -37,6 +37,7 @@ class SubprocessService:
         self._bus = bus
         self._handle: Optional[StreamHandle] = None
         self._lock = threading.RLock()
+        self._handles: dict[str, WorkerHandle] = {}
 
     # ---------- lifecycle ----------
 
@@ -105,11 +106,39 @@ class SubprocessService:
             drop_outdated=drop_outdated,
         )
 
+    def run_async(
+        self,
+        fn: Callable[[], Any],
+        *,
+        key: str = "subprocess.control.run",
+        cancel_previous: bool = False,
+        drop_outdated: bool = True,
+        on_success: Optional[Callable[[Any], None]] = None,
+        on_error: Optional[Callable[[BaseException], None]] = None,
+    ) -> Future:
+        """Submit an arbitrary callable to the TaskRunner pool thread."""
+        with self._lock:
+            self._ensure_running()
+        return self._io.run(
+            fn,
+            on_success=on_success,
+            on_error=on_error,
+            key=key,
+            cancel_previous=cancel_previous,
+            drop_outdated=drop_outdated,
+        )
+
     # ---------- worker routing ----------
 
     def worker(self, name: str) -> WorkerHandle:
-        """Return a handle for sending commands to a specific named worker."""
-        return WorkerHandle(service=self, name=name)
+        """Return the registered handle for a named worker, creating a plain WorkerHandle if none was registered."""
+        if name not in self._handles:
+            self._handles[name] = WorkerHandle(service=self, name=name, bus=self._bus)
+        return self._handles[name]
+
+    def _register_handle(self, name: str, handle: WorkerHandle) -> None:
+        """Register a pre-built handle for worker(name) to return."""
+        self._handles[name] = handle
 
     # ---------- stream callbacks ----------
 

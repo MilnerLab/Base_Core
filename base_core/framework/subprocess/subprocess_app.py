@@ -65,8 +65,6 @@ class SubprocessApp(JsonlStdioAppBase):
     # ------------------------------------------------------------------
 
     def run(self) -> None:
-        # Workers start STOPPED; they wait for StartWorker commands.
-        # Inject stop event for workers added before run() — already done in add_worker.
         try:
             super().run()  # starts stdin thread, calls main(), sets _stop on exit
         finally:
