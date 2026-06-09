@@ -57,7 +57,7 @@ class SharedBufferCoordinator:
         (i.e., during the DI register() phase, before any on_startup() runs).
         """
         if consumer_id in self._consumer_bits:
-            raise ValueError(f"Consumer {consumer_id!r} is already registered.")
+            return  # already pre-registered during DI phase — idempotent
         if any(s.state != "FREE" for s in self._slots):
             raise RuntimeError(
                 f"Cannot register consumer {consumer_id!r}: slots already in flight."
