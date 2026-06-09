@@ -6,7 +6,7 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Callable, ClassVar, Generic, Optional, TypeVar
 
-from base_core.framework.subprocess.shared_memory.base_protocol import (
+from base_core.framework.subprocess.shared_memory.shared_memory_base_messages import (
     ConfigureBuffer,
     ItemAvailable,
     ItemAck,
@@ -80,11 +80,18 @@ class Worker(ABC):
         return self._stop.is_set() or self._worker_stop.is_set()
 
     # ------------------------------------------------------------------
-    # Dispatch hook (called from stdin thread — must not block)
+    # Dispatch hooks
     # ------------------------------------------------------------------
 
+    def _receive(self, msg: Message, request_id: Optional[str]) -> None:
+        """Entry point called from the stdin thread. Must not block.
+        Default: calls handle() directly. CommandWorker overrides this to enqueue."""
+        self.handle(msg, request_id)
+
     def handle(self, msg: Message, request_id: Optional[str]) -> None:
-        """Receive an incoming targeted command. Default is a no-op."""
+        """Process an incoming command. Override in subclasses to dispatch by message type.
+        For ProducerWorker/Worker subclasses this runs in the stdin thread.
+        For CommandWorker subclasses this runs in the worker thread after dequeuing."""
 
     # ------------------------------------------------------------------
     # Worker thread entry point (override in subclasses)
@@ -99,7 +106,13 @@ class Worker(ABC):
     # ------------------------------------------------------------------
 
     def _reset(self) -> None:
-        """Reset internal state before (re)starting. Called before each _start()."""
+        """Reset internal state before (re)starting. Called before each start()."""
+
+    def start(self) -> None:
+        """Called after _reset(), before the worker thread begins. Override to open hardware."""
+
+    def close(self) -> None:
+        """Called after the worker thread exits. Override to close hardware."""
 
     # ------------------------------------------------------------------
     # Lifecycle (called by SubprocessApp — not by user code)
@@ -113,6 +126,7 @@ class Worker(ABC):
         """Start the worker thread. Called on each StartWorker command."""
         self._worker_stop = threading.Event()
         self._reset()
+        self.start()
         self._thread = threading.Thread(
             target=self._run_safe, name=f"worker.{self.name}", daemon=True
         )
@@ -124,6 +138,7 @@ class Worker(ABC):
         if self._thread is not None:
             self._thread.join(timeout=timeout)
             self._thread = None
+        self.close()
 
     def _join(self, timeout: float = 5.0) -> None:
         """Join thread on subprocess shutdown (worker exits via _stop)."""
@@ -145,12 +160,20 @@ class Worker(ABC):
 # CommandWorker
 # ---------------------------------------------------------------------------
 
-class CommandWorker(Worker, ABC):
+class CommandWorker(Worker):
     """
     Worker that processes commands from a queue in its own thread.
 
-    handle() enqueues incoming commands immediately (non-blocking from stdin thread).
-    _process() runs in the worker thread — safe for blocking hardware I/O.
+    _receive() enqueues incoming commands immediately (non-blocking from stdin thread).
+    handle() runs in the worker thread — safe for blocking hardware I/O.
+
+    Subclasses override handle() to dispatch by message type, exactly like ProducerWorker:
+
+        def handle(self, msg, request_id):
+            if isinstance(msg, MyCommand):
+                self._handle_my_command(msg, request_id)
+            else:
+                super().handle(msg, request_id)
     """
 
     def __init__(self) -> None:
@@ -158,9 +181,13 @@ class CommandWorker(Worker, ABC):
         self._queue: collections.deque[tuple[Message, Optional[str]]] = collections.deque()
         self._queue_event = threading.Event()
 
-    def handle(self, msg: Message, request_id: Optional[str]) -> None:
+    def _receive(self, msg: Message, request_id: Optional[str]) -> None:
         self._queue.append((msg, request_id))
         self._queue_event.set()
+
+    def handle(self, msg: Message, request_id: Optional[str]) -> None:
+        """Default: reply error for unhandled commands. Subclasses should call super() in else branch."""
+        self.reply_error(request_id, f"Unhandled command: {type(msg).__name__}")
 
     def run(self) -> None:
         while not self._should_stop:
@@ -171,17 +198,13 @@ class CommandWorker(Worker, ABC):
                 if not self._queue:
                     self._queue_event.clear()
                 try:
-                    self._process(msg, request_id)
+                    self.handle(msg, request_id)
                 except Exception as exc:
                     self.reply_error(request_id, str(exc))
 
     def _reset(self) -> None:
         self._queue.clear()
         self._queue_event.clear()
-
-    @abstractmethod
-    def _process(self, msg: Message, request_id: Optional[str]) -> None:
-        """Handle one command. Call self.reply_ok / self.reply_error as needed."""
 
 
 # ---------------------------------------------------------------------------

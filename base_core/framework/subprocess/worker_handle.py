@@ -5,7 +5,7 @@ from concurrent.futures import Future
 from typing import Callable, Optional
 
 from base_core.framework.subprocess.subprocess_service import SubprocessService
-from base_core.framework.subprocess.shared_memory.base_protocol import (
+from base_core.framework.subprocess.shared_memory.shared_memory_base_messages import (
     ConfigureBuffer,
     ItemAck,
     ItemAvailable,

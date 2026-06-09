@@ -129,6 +129,6 @@ class SubprocessApp(JsonlStdioAppBase):
             return
 
         try:
-            worker.handle(msg, request_id)
+            worker._receive(msg, request_id)
         except Exception as exc:
             self.reply_error(request_id, str(exc))
