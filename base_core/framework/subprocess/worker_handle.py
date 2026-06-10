@@ -13,9 +13,7 @@ from base_core.framework.subprocess.shared_memory.shared_memory_base_messages im
     ItemWritten,
     SlotGranted,
 )
-from base_core.framework.subprocess.shared_memory.shared_buffer_coordinator import (
-    SharedBufferCoordinator,
-)
+from base_core.framework.subprocess.shared_memory.buffer_output import BufferOutput
 from base_core.framework.subprocess.shared_memory.shared_ring_buffer import SharedRingBuffer
 from base_core.framework.subprocess.worker_protocol import StartWorker, StopWorker
 from base_core.framework.events.event_bus import EventBus
@@ -32,7 +30,7 @@ if TYPE_CHECKING:
 @dataclass
 class _InputConfig:
     buffer_id: str
-    upstream_coordinator: SharedBufferCoordinator
+    upstream_output: BufferOutput
     upstream_buffer: SharedRingBuffer
     registered: bool = field(default=False, compare=False)
 
@@ -41,6 +39,7 @@ class _InputConfig:
 class _OutputConfig:
     buffer: SharedRingBuffer
     coordinator: SharedBufferCoordinator
+    item_notifier: Optional[Callable[[str, int, int, int], None]] = field(default=None, compare=False)
 
 
 # ---------------------------------------------------------------------------
@@ -96,7 +95,7 @@ class WorkerHandle:
     def with_input(
         self,
         buffer_id: str,
-        upstream_coordinator: SharedBufferCoordinator,
+        upstream_output: BufferOutput,
         upstream_buffer: SharedRingBuffer,
     ) -> WorkerHandle:
         """Register an input buffer channel. Returns self for chaining."""
@@ -104,7 +103,7 @@ class WorkerHandle:
             raise RuntimeError("WorkerHandle needs bus= to use with_input().")
         self._inputs.append(_InputConfig(
             buffer_id=buffer_id,
-            upstream_coordinator=upstream_coordinator,
+            upstream_output=upstream_output,
             upstream_buffer=upstream_buffer,
         ))
         return self
@@ -113,11 +112,12 @@ class WorkerHandle:
         self,
         buffer: SharedRingBuffer,
         coordinator: SharedBufferCoordinator,
+        item_notifier: Optional[Callable[[str, int, int, int], None]] = None,
     ) -> WorkerHandle:
         """Register an output buffer. Returns self for chaining."""
         if self._bus is None:
             raise RuntimeError("WorkerHandle needs bus= to use with_output().")
-        self._output = _OutputConfig(buffer=buffer, coordinator=coordinator)
+        self._output = _OutputConfig(buffer=buffer, coordinator=coordinator, item_notifier=item_notifier)
         return self
 
     # ------------------------------------------------------------------
@@ -160,20 +160,12 @@ class WorkerHandle:
         return self.start_async(key=key, on_success=on_success, on_error=on_error)
 
     # ------------------------------------------------------------------
-    # Slot acknowledgement (output-buffer workers only)
+    # Slot grant (output-buffer workers only)
     # ------------------------------------------------------------------
 
     @property
     def output_buffer(self) -> Optional[SharedRingBuffer]:
         return self._output.buffer if self._output else None
-
-    def ack_slot(self, slot: int, item_id: int, consumer_id: str) -> None:
-        """Called by in-process consumers when done reading an output slot."""
-        if self._output is None:
-            raise RuntimeError(
-                f"Worker {self._name!r} has no output buffer configured."
-            )
-        self._do_ack(slot=slot, item_id=item_id, consumer_id=consumer_id)
 
     def send_grant(self, grant: dict) -> None:
         """Send a SlotGranted command for a grant dict returned by the coordinator."""
@@ -225,10 +217,10 @@ class WorkerHandle:
         # 1. Register as consumer for each input (first call only)
         for cfg in self._inputs:
             if not cfg.registered:
-                cfg.upstream_coordinator.register_consumer(self._name)
+                cfg.upstream_output.coordinator.register_consumer(self._name)
                 cfg.registered = True
 
-        # 2. Configure each input buffer in the worker + subscribe ItemAvailable forwarding
+        # 2. Configure each input buffer in the worker + register slot listener + ItemAck handler
         for cfg in self._inputs:
             reply = self._service.request_sync(
                 self._stamp(ConfigureBuffer(spec=cfg.upstream_buffer.spec, buffer_id=cfg.buffer_id))
@@ -238,10 +230,8 @@ class WorkerHandle:
                     f"ConfigureBuffer (input, buffer_id={cfg.buffer_id!r}) "
                     f"failed for worker {self._name!r}: {reply.get('error')}"
                 )
-            buffer_id = cfg.buffer_id
-            self._cleanup.add(
-                self._bus.subscribe(ItemAvailable, self._make_item_available_forwarder(buffer_id))
-            )
+            self._cleanup.add(cfg.upstream_output.add_item_listener(self._make_slot_forwarder(cfg)))
+            self._cleanup.add(self._bus.subscribe(ItemAck, self._make_ack_handler(cfg)))
 
         # 3. Configure output buffer if present
         if self._output is not None:
@@ -263,7 +253,6 @@ class WorkerHandle:
                     ))
                 )
             self._cleanup.add(self._bus.subscribe(ItemWritten, self._on_item_written))
-            self._cleanup.add(self._bus.subscribe(ItemAck, self._on_item_ack))
 
         # 4. Start the worker thread
         reply = self._service.request_sync(StartWorker(worker_name=self._name))
@@ -273,18 +262,31 @@ class WorkerHandle:
             )
 
     # ------------------------------------------------------------------
-    # Internal — ItemAvailable forwarding (one closure per input channel)
+    # Internal — input slot forwarding and ack (one closure per input channel)
     # ------------------------------------------------------------------
 
-    def _make_item_available_forwarder(self, buffer_id: str) -> Callable[[ItemAvailable], None]:
-        def forward(msg: ItemAvailable) -> None:
-            if msg.consumer_id != self._name or msg.buffer_id != buffer_id:
+    def _make_slot_forwarder(self, cfg: _InputConfig) -> Callable[[str, int, int, int], None]:
+        def forward(consumer_id: str, slot: int, item_id: int, timestamp_ns: int) -> None:
+            if consumer_id != self._name:
                 return
-            self._service.send(self._stamp(msg))
+            self._service.send(self._stamp(ItemAvailable(
+                consumer_id=consumer_id,
+                slot=slot,
+                item_id=item_id,
+                timestamp_ns=timestamp_ns,
+                buffer_id=cfg.buffer_id,
+            )))
         return forward
 
+    def _make_ack_handler(self, cfg: _InputConfig) -> Callable[[ItemAck], None]:
+        def handle(msg: ItemAck) -> None:
+            if msg.consumer_id != self._name or msg.buffer_id != cfg.buffer_id:
+                return
+            cfg.upstream_output.ack_slot(msg.slot, msg.item_id, msg.consumer_id)
+        return handle
+
     # ------------------------------------------------------------------
-    # Internal — output coordinator handlers
+    # Internal — output coordinator handler
     # ------------------------------------------------------------------
 
     def _on_item_written(self, msg: ItemWritten) -> None:
@@ -294,35 +296,11 @@ class WorkerHandle:
         notifications = self._output.coordinator.on_item_written(
             slot=msg.slot, item_id=msg.item_id
         )
-        for n in notifications:
-            self._bus.publish(
-                ItemAvailable(
-                    consumer_id=n["consumer_id"],
-                    slot=n["slot"],
-                    item_id=n["item_id"],
-                    timestamp_ns=msg.timestamp_ns,
-                    buffer_id=self._name,
+        if self._output.item_notifier is not None:
+            for n in notifications:
+                self._output.item_notifier(
+                    n["consumer_id"], n["slot"], n["item_id"], msg.timestamp_ns
                 )
-            )
-
-    def _on_item_ack(self, msg: ItemAck) -> None:
-        if msg.buffer_id != self._name:
-            return
-        self._do_ack(slot=msg.slot, item_id=msg.item_id, consumer_id=msg.consumer_id)
-
-    def _do_ack(self, *, slot: int, item_id: int, consumer_id: str) -> None:
-        assert self._output is not None
-        result = self._output.coordinator.on_item_ack(
-            slot=slot, item_id=item_id, consumer_id=consumer_id
-        )
-        if result.outcome == "completed" and result.grant is not None:
-            self._service.send(
-                self._stamp(SlotGranted(
-                    slot=result.grant["slot"],
-                    item_id=result.grant["item_id"],
-                    buffer_id=self._name,
-                ))
-            )
 
     def _stamp(self, cmd: Message) -> Message:
         """Return a copy of cmd with target set to this worker's name."""

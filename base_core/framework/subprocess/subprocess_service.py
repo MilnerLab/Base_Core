@@ -4,6 +4,7 @@ import threading
 from concurrent.futures import Future
 from typing import Any, Callable, ClassVar, Optional
 
+from base_core.framework.app.app_message import AppMessage, MessageLevel
 from base_core.framework.app.service_status import ServiceStatus
 from base_core.framework.concurrency.models import StreamHandle
 from base_core.framework.concurrency.task_runner import TaskRunner
@@ -11,6 +12,7 @@ from base_core.framework.events.event_bus import EventBus
 from base_core.framework.subprocess.json_endpoint import JsonlSubprocessEndpoint
 from base_core.framework.subprocess.messages import Message
 from base_core.framework.subprocess.worker_handle import WorkerHandle
+from base_core.framework.subprocess.worker_protocol import WorkerError
 
 
 class SubprocessService:
@@ -38,9 +40,15 @@ class SubprocessService:
         self._io = io
         self._endpoint = endpoint
         self._bus = bus
+        self._internal_bus = EventBus()
         self._handle: Optional[StreamHandle] = None
         self._lock = threading.RLock()
         self._handles: dict[str, WorkerHandle] = {}
+        self._worker_error_sub: Optional[Callable] = None
+
+    @property
+    def internal_bus(self) -> EventBus:
+        return self._internal_bus
 
     # ---------- status ----------
 
@@ -63,13 +71,16 @@ class SubprocessService:
             self._endpoint.start()
             self._handle = self._io.stream(
                 self._endpoint.produce,
-                on_item=self._bus.publish,
+                on_item=self._internal_bus.publish,
                 on_error=self._on_stream_error,
                 on_complete=self._on_stream_complete,
                 key="subprocess.stream",
                 cancel_previous=True,
                 drop_outdated=True,
                 coalesce=False,
+            )
+            self._worker_error_sub = self._internal_bus.subscribe(
+                WorkerError, self._on_worker_error
             )
 
     def stop(self) -> None:
@@ -79,6 +90,9 @@ class SubprocessService:
             self._endpoint.stop()
             if handle is not None:
                 handle.stop()
+            if self._worker_error_sub is not None:
+                self._worker_error_sub()
+                self._worker_error_sub = None
 
     # ---------- control API ----------
 
@@ -149,7 +163,7 @@ class SubprocessService:
     def worker(self, name: str) -> WorkerHandle:
         """Return the registered handle for a named worker, creating a plain WorkerHandle if none was registered."""
         if name not in self._handles:
-            self._handles[name] = WorkerHandle(service=self, name=name, bus=self._bus)
+            self._handles[name] = WorkerHandle(service=self, name=name, bus=self._internal_bus)
         return self._handles[name]
 
     def _register_handle(self, name: str, handle: WorkerHandle) -> None:
@@ -157,6 +171,12 @@ class SubprocessService:
         self._handles[name] = handle
 
     # ---------- stream callbacks ----------
+
+    def _on_worker_error(self, event: WorkerError) -> None:
+        detail = f"worker crashed ({event.worker_name}): {event.error}"
+        if self.service_name:
+            self._bus.publish(AppMessage(f"{self.service_name}: {detail}", MessageLevel.ERROR))
+            self._bus.publish(ServiceStatus(self.service_name, False, detail))
 
     def _on_stream_error(self, e: BaseException) -> None:
         self.stop()
