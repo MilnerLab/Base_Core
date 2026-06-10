@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 from messages import Message, Kind, MessageRegistry
 from base_core.framework.subprocess.shared_memory.models import SharedRingBufferSpec
+from base_core.framework.subprocess.worker_protocol import WorkerError, StartWorker, StopWorker
 
 
 # =====================================================================
@@ -83,7 +84,9 @@ SHARED_MEMORY_MESSAGES = (
     ItemAck,
 )
 
+BASE_MESSAGES = SHARED_MEMORY_MESSAGES + (StartWorker, StopWorker, WorkerError)
+
 
 def base_registry() -> MessageRegistry:
-    """Fresh registry preloaded with all base shared-memory protocol messages."""
-    return MessageRegistry().register(*SHARED_MEMORY_MESSAGES)
+    """Fresh registry preloaded with all base protocol messages (shared-memory + worker lifecycle)."""
+    return MessageRegistry().register(*BASE_MESSAGES)
