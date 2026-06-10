@@ -5,7 +5,7 @@ import sys
 import threading
 from typing import Any, Callable, Optional, Type
 
-from messages import Message, MessageRegistry, Kind
+from base_core.framework.subprocess.messages import Message, MessageRegistry, Kind
 
 
 # A handler receives the decoded message and the request id (str) or None if

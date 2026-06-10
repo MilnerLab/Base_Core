@@ -51,20 +51,33 @@ class SharedBufferCoordinator:
             slot.pending_consumers = 0
             slot.acked_mask = 0
 
-    def register_consumer(self, consumer_id: str) -> None:
+    def register_consumer(self, consumer_id: str) -> list[dict]:
         """
-        Add a consumer dynamically.  Must be called before grant_initial_slots()
-        (i.e., during the DI register() phase, before any on_startup() runs).
+        Add a consumer.  Safe to call at any time — including while slots are in flight.
+
+        Any PUBLISHED slots that this consumer hasn't seen yet are auto-acked (the VM
+        can't retroactively read past data).  Returns grants for any slots that became
+        fully acked as a result and should be sent as SlotGranted commands.
+
+        Idempotent: returns [] if the consumer was already registered.
         """
         if consumer_id in self._consumer_bits:
-            return  # already pre-registered during DI phase — idempotent
-        if any(s.state != "FREE" for s in self._slots):
-            raise RuntimeError(
-                f"Cannot register consumer {consumer_id!r}: slots already in flight."
-            )
+            return []
         bit = 1 << len(self._consumer_bits)
         self._consumer_bits[consumer_id] = bit
         self._required_consumer_count += 1
+        # Auto-ack any already-published slots for this new consumer.
+        grants: list[dict] = []
+        for idx, info in enumerate(self._slots):
+            if info.state != "PUBLISHED":
+                continue
+            info.acked_mask |= bit
+            info.pending_consumers -= 1
+            if info.pending_consumers == 0:
+                info.state = "FREE"
+                info.item_id = None
+                grants.append(self._allocate_slot(idx))
+        return grants
 
     def grant_initial_slots(self) -> list[dict]:
         out: list[dict] = []
@@ -107,6 +120,32 @@ class SharedBufferCoordinator:
             {"consumer_id": consumer_id, "slot": slot, "item_id": item_id}
             for consumer_id in self._consumer_bits
         ]
+
+    def unregister_consumer(self, consumer_id: str) -> list[dict]:
+        """
+        Remove a consumer and return grants for any slots that fully completed as a result.
+
+        In-flight PUBLISHED slots that the departing consumer hasn't acked yet are
+        force-acked so the buffer doesn't deadlock.  Each returned grant dict has the
+        same shape as AckResult.grant and should be sent as a SlotGranted command.
+        """
+        bit = self._consumer_bits.pop(consumer_id, None)
+        if bit is None:
+            return []
+        self._required_consumer_count -= 1
+        grants: list[dict] = []
+        for idx, info in enumerate(self._slots):
+            if info.state != "PUBLISHED":
+                continue
+            if info.acked_mask & bit:
+                continue  # already acked by this consumer
+            info.acked_mask |= bit
+            info.pending_consumers -= 1
+            if info.pending_consumers == 0:
+                info.state = "FREE"
+                info.item_id = None
+                grants.append(self._allocate_slot(idx))
+        return grants
 
     def on_item_ack(
         self,

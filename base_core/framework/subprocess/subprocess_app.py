@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 from typing import Optional
 
+from base_core.framework.subprocess.json_process_base import JsonlStdioAppBase
 from base_core.framework.subprocess.messages import Kind, MessageRegistry
 from base_core.framework.subprocess.worker import Worker
 from base_core.framework.subprocess.worker_protocol import (
@@ -10,7 +11,6 @@ from base_core.framework.subprocess.worker_protocol import (
     StopWorker,
     WorkerError,
 )
-from json_process_base import JsonlStdioAppBase
 
 
 class SubprocessApp(JsonlStdioAppBase):

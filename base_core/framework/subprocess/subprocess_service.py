@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import threading
 from concurrent.futures import Future
-from typing import Any, Callable, Optional
+from typing import Any, Callable, ClassVar, Optional
 
+from base_core.framework.app.service_status import ServiceStatus
 from base_core.framework.concurrency.models import StreamHandle
 from base_core.framework.concurrency.task_runner import TaskRunner
 from base_core.framework.events.event_bus import EventBus
@@ -26,6 +27,8 @@ class SubprocessService:
     For analysis / calculation subprocesses use this directly.
     """
 
+    service_name: ClassVar[str] = ""
+
     def __init__(
         self,
         io: TaskRunner,
@@ -39,7 +42,19 @@ class SubprocessService:
         self._lock = threading.RLock()
         self._handles: dict[str, WorkerHandle] = {}
 
+    # ---------- status ----------
+
+    def _publish_status(self, running: bool, detail: str = "") -> None:
+        """Publish a ServiceStatus event if service_name is declared."""
+        if self.service_name:
+            self._bus.publish(ServiceStatus(self.service_name, running, detail))
+
     # ---------- lifecycle ----------
+
+    @property
+    def is_running(self) -> bool:
+        with self._lock:
+            return self._handle is not None
 
     def start(self) -> None:
         with self._lock:

@@ -175,6 +175,16 @@ class WorkerHandle:
             )
         self._do_ack(slot=slot, item_id=item_id, consumer_id=consumer_id)
 
+    def send_grant(self, grant: dict) -> None:
+        """Send a SlotGranted command for a grant dict returned by the coordinator."""
+        self._service.send(
+            self._stamp(SlotGranted(
+                slot=grant["slot"],
+                item_id=grant["item_id"],
+                buffer_id=self._name,
+            ))
+        )
+
     # ------------------------------------------------------------------
     # Command API
     # ------------------------------------------------------------------
