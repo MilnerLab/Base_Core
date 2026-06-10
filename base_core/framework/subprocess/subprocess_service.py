@@ -68,9 +68,10 @@ class SubprocessService:
     # ---------- control API ----------
 
     def send(self, message: Message) -> None:
-        """Fire-and-forget command/event to the subprocess."""
+        """Fire-and-forget command/event to the subprocess. Silent no-op if not running."""
         with self._lock:
-            self._ensure_running()
+            if self._handle is None or not self._endpoint.is_running():
+                return
             self._endpoint.send(message)
 
     def request_sync(self, message: Message, *, timeout_s: float = 2.0) -> dict:

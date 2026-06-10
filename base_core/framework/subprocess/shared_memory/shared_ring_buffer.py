@@ -51,11 +51,15 @@ class SharedRingBuffer:
             shape=shape,
             dtype=dtype,
         )
-        shm = shared_memory.SharedMemory(
-            name=spec.name,
-            create=True,
-            size=spec.slot_count * spec.slot_size,
-        )
+        size = spec.slot_count * spec.slot_size
+        try:
+            shm = shared_memory.SharedMemory(name=spec.name, create=True, size=size)
+        except FileExistsError:
+            # Stale segment from a previous crash — unlink and recreate.
+            stale = shared_memory.SharedMemory(name=spec.name, create=False)
+            stale.unlink()
+            stale.close()
+            shm = shared_memory.SharedMemory(name=spec.name, create=True, size=size)
         buffer = cls(spec=spec, shm=shm, owner=True)
         buffer.zero_initialize()
         return buffer

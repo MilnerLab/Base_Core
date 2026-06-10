@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+from mailbox import Message
 import subprocess
 import threading
 import uuid
 from dataclasses import dataclass
 from typing import Iterator, Optional
 
-from messages import Message, MessageRegistry, Kind
+from base_core.framework.subprocess.messages import Kind, MessageRegistry
+
 
 
 @dataclass

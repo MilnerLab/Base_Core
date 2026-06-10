@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from messages import Message, Kind, MessageRegistry
+from base_core.framework.subprocess.messages import Kind, Message, MessageRegistry
 from base_core.framework.subprocess.shared_memory.models import SharedRingBufferSpec
 from base_core.framework.subprocess.worker_protocol import WorkerError, StartWorker, StopWorker
 

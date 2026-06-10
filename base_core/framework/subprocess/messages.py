@@ -4,7 +4,8 @@ import functools
 from dataclasses import dataclass, field, fields, MISSING
 from typing import Any, ClassVar, Optional, Type, TypeVar, get_type_hints
 
-from serialization.serde import Primitive, PrimitiveSerde
+from base_core.framework.serialization.serde import Primitive, PrimitiveSerde
+
 
 
 # ---------------------------------------------------------------------

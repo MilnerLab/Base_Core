@@ -3,6 +3,7 @@ from __future__ import annotations
 import dataclasses
 from concurrent.futures import Future
 from dataclasses import dataclass, field
+from mailbox import Message
 from typing import TYPE_CHECKING, Callable, Optional
 
 from base_core.framework.subprocess.shared_memory.shared_memory_base_messages import (
@@ -19,7 +20,6 @@ from base_core.framework.subprocess.shared_memory.shared_ring_buffer import Shar
 from base_core.framework.subprocess.worker_protocol import StartWorker, StopWorker
 from base_core.framework.events.event_bus import EventBus
 from base_core.framework.lifecycle.cleanup_collection import CleanupCollection
-from messages import Message
 
 if TYPE_CHECKING:
     from base_core.framework.subprocess.subprocess_service import SubprocessService
