@@ -8,10 +8,8 @@ from typing import Generic, Optional, Protocol, Self, TypeVar
 from base_core.framework.serialization.serde import PrimitiveSerde, Primitive
 
 from base_core.math.enums import AngleUnit, CartesianAxis, XZ
-from base_core.math.enums import AngleUnit, CartesianAxis, XZ
 
 FloatArray = npt.NDArray[np.float64]
-IntArray = np.ndarray
 IntArray = np.ndarray
 
 class SupportsOrdering(Protocol):
@@ -148,30 +146,6 @@ class Points:
         """Build Points from any array-like x/y inputs."""
         return cls(np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64))
 
-   
-
-    @classmethod
-    def from_polar(cls, r, phi) -> "Points":
-        """
-        Build 2D points from polar coordinates.
-
-        Convention:
-            x = r cos(phi)
-            y = r sin(phi)
-
-        phi is in radians.
-        """
-
-        r_arr = np.asarray(r, dtype=np.float64)
-        phi_arr = np.asarray(phi, dtype=np.float64)
-
-        r_b, phi_b = np.broadcast_arrays(r_arr, phi_arr)
-
-        x = r_b * np.cos(phi_b)
-        y = r_b * np.sin(phi_b)
-
-        return cls(x.ravel(), y.ravel())
-
     @classmethod
     def from_polar(cls, r, phi) -> "Points":
         """
@@ -224,26 +198,7 @@ class Points:
 
         return r, phi
 
-    def to_polar(self) -> tuple[FloatArray, FloatArray]:
-        """
-        Convert x/y points to polar coordinates.
-
-        Returns
-        -------
-        r:
-            radius sqrt(x^2 + y^2)
-
-        phi:
-            azimuth angle in [0, 2*pi)
-        """
-
-        r = np.hypot(self.x, self.y)
-        phi = np.mod(np.arctan2(self.y, self.x), 2.0 * np.pi)
-
-        return r, phi
-
     # -------- vectorized ops (in-place) --------
-
 
     def subtract(self, p: "Point") -> None:
         self.x -= float(p.x)
@@ -264,11 +219,6 @@ class Points:
 
         self.x = tx * c - ty * s + cx
         self.y = tx * s + ty * c + cy
-
-        if not self.x.flags["C_CONTIGUOUS"]:
-            self.x = np.ascontiguousarray(self.x)
-        if not self.y.flags["C_CONTIGUOUS"]:
-            self.y = np.ascontiguousarray(self.y)
 
         if not self.x.flags["C_CONTIGUOUS"]:
             self.x = np.ascontiguousarray(self.x)
@@ -385,148 +335,6 @@ class MarkedPoints(Points):
         self.x = np.append(self.x,pts.x)
         self.y = np.append(self.y,pts.y)
         
-
-
-    def copy(self) -> "Points":
-        return Points(self.x.copy(), self.y.copy())
-
-    def as_array(self) -> FloatArray:
-        """
-        Return points as array with shape (N, 2).
-
-        This creates a new array.
-        """
-
-        return np.column_stack((self.x, self.y))
-
-
-    def copy(self) -> "Points":
-        return Points(self.x.copy(), self.y.copy())
-
-    def as_array(self) -> FloatArray:
-        """
-        Return points as array with shape (N, 2).
-
-        This creates a new array.
-        """
-
-        return np.column_stack((self.x, self.y))
-
-@dataclass(slots=True)
-class MarkedPoints(Points):
-    marker: IntArray
-
-    def __post_init__(self) -> None:
-        super(MarkedPoints, self).__post_init__()
-
-        self.marker = np.asarray(self.marker, dtype=np.int64)
-
-        if self.marker.ndim != 1:
-            raise ValueError("marker must be 1D")
-        if self.marker.shape != self.x.shape:
-            raise ValueError("marker must have the same shape as x and y")
-
-        if not self.marker.flags["C_CONTIGUOUS"]:
-            self.marker = np.ascontiguousarray(self.marker)
-
-    @classmethod
-    def from_arrays(cls, marker, x, y) -> "MarkedPoints":
-        return cls(
-            x=np.asarray(x, dtype=np.float64),
-            y=np.asarray(y, dtype=np.float64),
-            marker=np.asarray(marker, dtype=np.int64),
-        )
-
-    def filter_by_distance_range(self, r: Range[float], *, inclusive: bool = True) -> "MarkedPoints":
-        d = np.hypot(self.x, self.y)
-        if inclusive:
-            m = (d >= float(r.min)) & (d <= float(r.max))
-        else:
-            m = (d > float(r.min)) & (d < float(r.max))
-        return MarkedPoints(self.x[m], self.y[m], self.marker[m])
-
-    def filter_by_mask(self, mask: np.ndarray) -> "MarkedPoints":
-        mask = np.asarray(mask, dtype=bool)
-        if mask.shape != self.x.shape:
-            raise ValueError("mask must have same shape as data")
-        return MarkedPoints(self.x[mask], self.y[mask], self.marker[mask])
-    
-    def unique_markers(self) -> np.ndarray:
-        return np.unique(self.marker)
-
-    @property
-    def n_markers(self) -> int:
-        if len(self.marker) == 0:
-            return 0
-        return int(np.unique(self.marker).size)
-
-    def avg_points_per_marker(self) -> float:
-        n = self.n_markers
-        return 0.0 if n == 0 else len(self) / n
-        
-@dataclass(frozen=True)
-class Histogram2D():
-    matrix: np.ndarray = None
-    x_edges: np.ndarray = None
-    y_edges: np.ndarray = None
-    
-@dataclass(slots=True)
-class Points3D:
-    x: FloatArray
-    y: FloatArray
-    z: FloatArray
-
-    def __post_init__(self) -> None:
-        self.x = np.ascontiguousarray(self.x, dtype=np.float64)
-        self.y = np.ascontiguousarray(self.y, dtype=np.float64)
-        self.z = np.ascontiguousarray(self.z, dtype=np.float64)
-
-        if self.x.ndim != 1 or self.y.ndim != 1 or self.z.ndim != 1:
-            raise ValueError("x, y and z must be 1D arrays")
-        if not (self.x.shape == self.y.shape == self.z.shape):
-            raise ValueError("x, y and z must have the same shape")
-
-    def __len__(self) -> int:
-        return int(self.x.size)
-
-    @classmethod
-    def from_xyz(cls, x, y, z) -> "Points3D":
-        return cls(x, y, z)
-
-    @classmethod
-    def compute_histogram(cls, points: Points, x_bins: int = 400, y_bins: int = 400, bin_size: float = 0.4, radial_range: Range[float] = Range(0,60)) -> "Histogram2D":
-        
-        if x_bins is None and y_bins is not None | y_bins is None and x_bins is not None: 
-            raise TypeError("x_bins and y_bins must either both be None or both be integers.")
-        
-        radial_width = radial_range.max - radial_range.min
-        if bin_size > 2*radial_width: 
-            raise ValueError("Bin size cannot be larger than the region of interest.")
-        #x_0 , y_0 = center.x, center.y
-        
-        p_x = points.x
-        p_y = points.y    
-        
-
-        x_bins = 2*radial_width/bin_size if x_bins is None else x_bins
-        y_bins = 2*radial_width/bin_size if y_bins is None else y_bins
-        #matrix, x_edges, y_edges = np.histogram2d(p_x, p_y, bins=[x_bins, y_bins], range=[[x_range.min, x_range.max], [y_range.min, y_range.max]])
-        matrix, x_edges, y_edges = np.histogram2d(p_x, p_y, bins=[x_bins, y_bins])
-        return cls(matrix,x_edges,y_edges)
-
-
-@dataclass(frozen=True)
-class AngularCovariance:
-    matrix: np.ndarray
-    theta1_edges: np.ndarray
-    theta2_edges: np.ndarray
-    n_frames: int
-    
-    
-    def append_points(self,pts: "Points") -> None:
-        self.x = np.append(self.x,pts.x)
-        self.y = np.append(self.y,pts.y)
-        
 @dataclass(slots=True)
 class Points3D:
     x: FloatArray
@@ -570,95 +378,6 @@ class Points3D:
         sin_theta = np.sin(theta)
 
         return cls(
-            matrix=ang_cov,
-            theta1_edges=bin_edges,
-            theta2_edges=bin_edges.copy(),
-            n_frames=n_markers,
-        )
-    def from_spherical(cls, r, theta, phi) -> "Points3D":
-        """
-        Physics convention:
-            x = r sin(theta) cos(phi)
-            y = r sin(theta) sin(phi)
-            z = r cos(theta)
-
-        theta: polar angle from +z axis
-        phi: azimuth angle in xy plane
-        """
-        r, theta, phi = np.broadcast_arrays(
-            np.asarray(r, dtype=np.float64),
-            np.asarray(theta, dtype=np.float64),
-            np.asarray(phi, dtype=np.float64),
-        )
-
-        sin_theta = np.sin(theta)
-
-        return cls(
-            (r * sin_theta * np.cos(phi)).ravel(),
-            (r * sin_theta * np.sin(phi)).ravel(),
-            (r * np.cos(theta)).ravel(),
-        )
-
-    def to_spherical(self) -> tuple[FloatArray, FloatArray, FloatArray]:
-        """
-        Returns:
-            r, theta, phi
-
-        theta in [0, pi]
-        phi in [0, 2*pi)
-        """
-        r = np.sqrt(self.x**2 + self.y**2 + self.z**2)
-
-        theta = np.zeros_like(r)
-        mask = r > 0.0
-        theta[mask] = np.arccos(np.clip(self.z[mask] / r[mask], -1.0, 1.0))
-
-        phi = np.mod(np.arctan2(self.y, self.x), 2.0 * np.pi)
-
-        return r, theta, phi
-
-    def coordinate(self, axis: CartesianAxis) -> FloatArray:
-        axis = axis.require_single()
-
-        if axis is CartesianAxis.X:
-            return self.x
-        if axis is CartesianAxis.Y:
-            return self.y
-        if axis is CartesianAxis.Z:
-            return self.z
-
-        raise ValueError(f"Unsupported axis: {axis}")
-
-    def project_to_plane(self, plane: CartesianAxis = XZ) -> "Points":
-        a, b = plane.require_plane().axes()
-        return Points(self.coordinate(a).copy(), self.coordinate(b).copy())
-
-    def radius(self) -> FloatArray:
-        return np.sqrt(self.x**2 + self.y**2 + self.z**2)
-
-    def normalized(self) -> "Points3D":
-        r = self.radius()
-        if np.any(r == 0.0):
-            raise ValueError("Cannot normalize points containing zero vectors")
-
-        return Points3D(self.x / r, self.y / r, self.z / r)
-
-    def normalize_inplace(self) -> None:
-        r = self.radius()
-        if np.any(r == 0.0):
-            raise ValueError("Cannot normalize points containing zero vectors")
-
-        self.x /= r
-        self.y /= r
-        self.z /= r
-
-    def copy(self) -> "Points3D":
-        return Points3D(self.x.copy(), self.y.copy(), self.z.copy())
-
-    def as_array(self) -> FloatArray:
-        return np.column_stack((self.x, self.y, self.z))
-           
-
             (r * sin_theta * np.cos(phi)).ravel(),
             (r * sin_theta * np.sin(phi)).ravel(),
             (r * np.cos(theta)).ravel(),
