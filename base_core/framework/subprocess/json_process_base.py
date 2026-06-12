@@ -5,27 +5,32 @@ import sys
 import threading
 from typing import Any, Callable, Optional, Type
 
-from base_core.framework.subprocess.messages import Message, MessageRegistry, Kind
+from base_core.framework.subprocess.messages import (
+    ErrorMessage,
+    Kind,
+    Message,
+    MessageRegistry,
+    OKMessage,
+)
 
 
-# A handler receives the decoded message and the request id (str) or None if
-# the command was fire-and-forget.  Call reply_ok / reply_error with that id.
-CommandHandler = Callable[["Message", "str | None"], None]
+CommandHandler = Callable[["Message"], None]
 
 
 class JsonlStdioAppBase:
     """
     JSONL stdio app base for subprocesses (the child side).
 
-    Mirror of JsonlSubprocessEndpoint:
-      - reads commands from stdin on a background thread
-      - decodes them into typed Message objects via a MessageRegistry
-      - dispatches each to a handler registered by message class
-      - emits typed events / replies to stdout
+    Reads commands from stdin on a background thread, decodes them into typed
+    Message objects via a MessageRegistry, dispatches each to a registered
+    handler, and emits typed events / replies to stdout.
 
-    Subclasses register handlers in __init__ via self.on(MessageClass, handler)
-    and implement main() for their device loop. No string command names, no
-    PROTOCOL constants.
+    Replies are named envelopes so endpoint.request() can decode them:
+      {"kind":"reply","name":"ok","reply_to":"<id>","payload":{}}
+      {"kind":"reply","name":"error","reply_to":"<id>","payload":{"error":"…"}}
+
+    Subclasses register handlers via self.on(MessageClass, handler) and
+    implement main() for their device loop.
     """
 
     def __init__(
@@ -52,15 +57,27 @@ class JsonlStdioAppBase:
     def emit(self, message: Message) -> None:
         """Emit a typed event message to stdout."""
         envelope = self._registry.envelope_for(message)
-        if self._source is not None and "source" not in envelope:
+        if self._source is not None:
             envelope["source"] = self._source
         self._write(envelope)
 
-    def reply_ok(self, request_id: Optional[str], payload: Optional[dict] = None) -> None:
-        self._reply(request_id, {"ok": True, "payload": dict(payload or {})})
+    def reply(self, request_id: Optional[str], reply_msg: Message) -> None:
+        """Send any typed reply message correlated to request_id."""
+        envelope = self._registry.envelope_for(reply_msg)
+        envelope["kind"] = Kind.REPLY
+        if isinstance(request_id, str):
+            envelope["reply_to"] = request_id
+        if self._source is not None:
+            envelope["source"] = self._source
+        self._write(envelope)
+
+    def reply_ok(self, request_id: Optional[str]) -> None:
+        """Send a typed OKMessage reply."""
+        self.reply(request_id, OKMessage())
 
     def reply_error(self, request_id: Optional[str], error: str) -> None:
-        self._reply(request_id, {"ok": False, "error": error})
+        """Send a typed ErrorMessage reply."""
+        self.reply(request_id, ErrorMessage(error=error))
 
     # ----- main work (override) -----
 
@@ -89,14 +106,6 @@ class JsonlStdioAppBase:
             sys.stdout.write(line)
             sys.stdout.flush()
 
-    def _reply(self, request_id: Optional[str], body: dict) -> None:
-        out = {"kind": Kind.REPLY, **body}
-        if isinstance(request_id, str):
-            out["reply_to"] = request_id
-        if self._source is not None:
-            out["source"] = self._source
-        self._write(out)
-
     def _stdin_loop(self) -> None:
         for line in sys.stdin:
             if self._stop.is_set():
@@ -111,7 +120,6 @@ class JsonlStdioAppBase:
             if not isinstance(envelope, dict):
                 continue
             self._dispatch(envelope)
-        # Parent closed stdin -> stop.
         self._stop.set()
 
     def _dispatch(self, envelope: dict) -> None:
@@ -124,11 +132,16 @@ class JsonlStdioAppBase:
             if request_id is not None:
                 self.reply_error(request_id, f"Unknown command: {envelope.get('name')}")
             return
-        handler = self._handlers.get(type(message))
+        self._dispatch_decoded(message)
+
+    def _dispatch_decoded(self, msg: Message) -> None:
+        """Dispatch an already-decoded message to the registered handler."""
+        handler = self._handlers.get(type(msg))
         if handler is None:
-            self.reply_error(request_id, f"No handler for {type(message).__name__}")
+            if msg.request_id is not None:
+                self.reply_error(msg.request_id, f"No handler for {type(msg).__name__}")
             return
         try:
-            handler(message, request_id)
-        except Exception as exc:  # noqa: BLE001
-            self.reply_error(request_id, str(exc))
+            handler(msg)
+        except Exception as exc:
+            self.reply_error(msg.request_id, str(exc))

@@ -91,6 +91,10 @@ class BufferOutput(Generic[AvailableT, AckT]):
     # Ack
     # ------------------------------------------------------------------
 
+    def send_grant(self, grant: dict) -> None:
+        """Send a single slot grant (e.g. from initial grants or catch-up after registration)."""
+        self._send_grant(grant)
+
     def ack_slot(self, slot: int, item_id: int, consumer_id: str) -> None:
         self._commit_ack(slot, item_id, consumer_id)
 

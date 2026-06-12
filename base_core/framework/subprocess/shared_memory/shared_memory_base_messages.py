@@ -1,8 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
-from base_core.framework.subprocess.messages import Kind, Message, MessageRegistry
+from base_core.framework.subprocess.messages import (
+    ErrorMessage,
+    Kind,
+    Message,
+    MessageRegistry,
+    OKMessage,
+    RequestMessage,
+)
 from base_core.framework.subprocess.shared_memory.models import SharedRingBufferSpec
 from base_core.framework.subprocess.worker_protocol import WorkerError, StartWorker, StopWorker
 
@@ -10,26 +18,21 @@ from base_core.framework.subprocess.worker_protocol import WorkerError, StartWor
 # =====================================================================
 # Base shared-memory slot protocol
 # =====================================================================
-# All messages carry a `buffer_id` so a single subprocess can own more
-# than one buffer (e.g. an analysis subprocess that reads from an input
-# buffer AND writes to an output buffer).  The empty string "" is the
-# default for subprocesses that have exactly one buffer.
-# =====================================================================
-
 
 # ----- main → subprocess (commands) -----
 
 @dataclass(frozen=True)
-class ConfigureBuffer(Message):
+class ConfigureBuffer(RequestMessage["OKMessage"]):
     """Attach to the shared buffer identified by buffer_id."""
     NAME = "configure_buffer"
     KIND = Kind.COMMAND
     spec: SharedRingBufferSpec
     buffer_id: str = ""
+    buffer_type: Literal["read", "write"] = "read"
 
 
 @dataclass(frozen=True)
-class SlotGranted(Message):
+class SlotGranted(RequestMessage["OKMessage"]):
     """You may write this slot in the output buffer."""
     NAME = "slot_granted"
     KIND = Kind.COMMAND
@@ -43,7 +46,6 @@ class ItemAvailable(Message):
     """A slot in an input buffer is ready for you to read."""
     NAME = "item_available"
     KIND = Kind.COMMAND
-    consumer_id: str
     slot: int
     item_id: int
     timestamp_ns: int
@@ -84,9 +86,9 @@ SHARED_MEMORY_MESSAGES = (
     ItemAck,
 )
 
-BASE_MESSAGES = SHARED_MEMORY_MESSAGES + (StartWorker, StopWorker, WorkerError)
+BASE_MESSAGES = SHARED_MEMORY_MESSAGES + (StartWorker, StopWorker, WorkerError, OKMessage, ErrorMessage)
 
 
 def base_registry() -> MessageRegistry:
-    """Fresh registry preloaded with all base protocol messages (shared-memory + worker lifecycle)."""
+    """Fresh registry with all base protocol messages plus typed reply classes."""
     return MessageRegistry().register(*BASE_MESSAGES)
