@@ -6,11 +6,10 @@ import subprocess
 import sys
 from abc import ABC, abstractmethod
 from multiprocessing import Pipe
-from typing import TYPE_CHECKING, Any, Callable, TypeVar
+from typing import TYPE_CHECKING
 
 from base_core.framework.concurrency.task_runner import TaskRunner
 from base_core.framework.events.event_bus import EventBus
-from base_core.ipc.message import ErrorReply, Message, Reply, Request
 from base_core.ipc.service_connector import ServicePipelineConnector
 
 if TYPE_CHECKING:
@@ -19,8 +18,6 @@ if TYPE_CHECKING:
     from base_core.ipc.worker_handle import BaseWorkerHandle
 
 log = logging.getLogger(__name__)
-
-TReply = TypeVar("TReply", bound=Reply)
 
 _JOIN_TIMEOUT = 5.0
 
@@ -32,16 +29,18 @@ class SubprocessService(ABC):
     The child is launched via subprocess.Popen so it can use a different Python
     executable (e.g. a 32-bit interpreter for hardware drivers).
 
+    Symmetric with the subprocess side:
+    - Outgoing: call connector.send(msg) or connector.request(msg, on_reply) directly.
+    - Incoming: the connector dispatches non-reply IPC messages to _service_bus;
+      handles subscribe there via _subscribe_service().
+
+    The global bus (self._bus) is used only for domain events.
+
     Buffer attachments: call add_buffer(BufferClass, spec) before start(). On start(),
-    the service sends AttachBuffer messages to the subprocess for each registered buffer
-    so the subprocess can attach to shared memory before its workers begin.
+    AttachBuffer requests are sent to the subprocess so it attaches shared memory before
+    workers receive any slot grants.
 
-    Subclass responsibilities:
-    1. Implement _entry_module — the dotted module path run with `python -m`.
-    2. Call add_buffer() for any shared memory buffers the subprocess should read.
-    3. Call send() / emit() to communicate with the subprocess after start().
-
-    Lifecycle: start() -> [send/emit] -> stop()
+    Lifecycle: start() → [connector.send/request] → stop()
     Re-starting after stop() is supported.
     """
 
@@ -54,22 +53,21 @@ class SubprocessService(ABC):
         self._bus = bus
         self._io = io
         self._python_exe = python_exe or sys.executable
+        self._service_bus = EventBus()
         self._connector: ServicePipelineConnector | None = None
         self._process: subprocess.Popen | None = None  # type: ignore[type-arg]
         self._attach_buffers: list[tuple[type[SharedMemoryBuffer], MemorySpec]] = []
         self._worker_handles: list[BaseWorkerHandle] = []
-        self._translations: dict[type, Callable[[Any], Any]] = {}
-        self._translation_unsubs: list[Callable[[], None]] = []
 
-    def add_translation(self, msg_type: type, to_event: Callable[[Any], Any]) -> None:
-        """
-        Declare a subprocess→bus translation.
+    @property
+    def connector(self) -> ServicePipelineConnector | None:
+        """The active pipe connector, or None before start() / after stop()."""
+        return self._connector
 
-        When a Message of msg_type arrives from the subprocess (dispatched onto the main
-        bus by the connector), call to_event(msg) and publish the returned event.
-        Subscriptions are created on start() and removed on stop().
-        """
-        self._translations[msg_type] = to_event
+    @property
+    def service_bus(self) -> EventBus:
+        """Per-service bus for incoming IPC events from the subprocess."""
+        return self._service_bus
 
     def add_handle(self, handle: BaseWorkerHandle) -> None:
         """Register a worker handle. _on_attached/_on_detached are called on start/stop."""
@@ -109,7 +107,11 @@ class SubprocessService(ABC):
         child_fd = child_conn.fileno()
         os.set_inheritable(child_fd, True)
 
-        self._connector = ServicePipelineConnector(parent_conn, self._bus, self._io)
+        self._connector = ServicePipelineConnector(
+            parent_conn,
+            service_bus=self._service_bus,
+            io=self._io,
+        )
         self._process = subprocess.Popen(
             [self._python_exe, "-m", self._entry_module, str(child_fd)],
             close_fds=False,
@@ -117,11 +119,15 @@ class SubprocessService(ABC):
         child_conn.close()
         self._connector.start()
 
-        # Send AttachBuffer for every registered buffer (FIFO — arrives before SlotGrants)
+        for handle in self._worker_handles:
+            handle._bind(self._connector, self._service_bus)
+            handle._on_pre_attach()
+
+        # AttachBuffer for every registered buffer (FIFO ordering with slot grants guaranteed)
         if self._attach_buffers:
             from base_core.framework.shm.messages import AttachBuffer
             for cls, spec in self._attach_buffers:
-                self.send(
+                self._connector.request(
                     AttachBuffer(buffer_class_name=cls.__name__, spec=spec),
                     on_reply=lambda r: None,
                     on_error=lambda r, name=cls.__name__: log.error(
@@ -132,21 +138,10 @@ class SubprocessService(ABC):
         for handle in self._worker_handles:
             handle._on_attached()
 
-        for msg_type, factory in self._translations.items():
-            def _handler(msg: Any, f: Callable[[Any], Any] = factory) -> None:
-                event = f(msg)
-                if event is not None:
-                    self._bus.publish(event)
-            self._translation_unsubs.append(self._bus.subscribe(msg_type, _handler))
-
     def stop(self) -> None:
         """Stop the read loop, terminate and join the subprocess."""
-        for unsub in self._translation_unsubs:
-            unsub()
-        self._translation_unsubs.clear()
-
         for handle in self._worker_handles:
-            handle._on_detached()
+            handle._unbind()
 
         if self._connector is not None:
             self._connector.stop()
@@ -165,18 +160,3 @@ class SubprocessService(ABC):
                     self._process.kill()
                     self._process.wait()
             self._process = None
-
-    def send(
-        self,
-        msg: Request[TReply],
-        on_reply: Callable[[TReply], None],
-        on_error: Callable[[ErrorReply], None] | None = None,
-    ) -> None:
-        """Delegate to connector. No-op if not started."""
-        if self._connector is not None:
-            self._connector.send(msg, on_reply, on_error)
-
-    def emit(self, msg: Message) -> None:
-        """Send a plain message (no reply expected). No-op if not started."""
-        if self._connector is not None:
-            self._connector.emit(msg)
