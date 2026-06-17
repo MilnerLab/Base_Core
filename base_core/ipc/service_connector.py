@@ -3,10 +3,8 @@ from __future__ import annotations
 import logging
 import threading
 from multiprocessing.connection import Connection
-from typing import Callable, Iterator, TypeVar
+from typing import Callable, TypeVar
 
-from base_core.framework.concurrency.models import StreamHandle
-from base_core.framework.concurrency.task_runner import TaskRunner
 from base_core.framework.events.event_bus import EventBus
 from base_core.ipc.codec import decode, encode
 from base_core.ipc.message import ErrorReply, Message, Reply, Request
@@ -25,49 +23,41 @@ class ServicePipelineConnector:
     Symmetric with SubprocessPipelineConnector on the worker side:
     - send(msg)             — fire-and-forget write to pipe
     - request(msg, ...)     — write to pipe + register reply callbacks
-    - Incoming bytes are read on a background thread and dispatched:
+    - Incoming bytes are read on a background daemon thread and dispatched:
         reply messages  → matched against pending callbacks
         other messages  → published to service_bus for handle subscribers
 
     Threading model:
-    - The read loop runs on a TaskRunner thread (io.stream with coalesce=False).
+    - The read loop runs on a single daemon thread spawned by start().
     - send()/request() acquire a write lock so concurrent callers don't interleave bytes.
-    - Reply callbacks are invoked on the reader thread. Consumers that need to dispatch
-      to the UI thread must do so explicitly.
+    - Reply callbacks are invoked on the reader thread.
     """
 
     def __init__(
         self,
         conn: Connection,
         service_bus: EventBus,
-        io: TaskRunner,
     ) -> None:
         self._conn = conn
         self._service_bus = service_bus
-        self._io = io
         self._pending: dict[str, tuple[Callable[[Reply], None], Callable[[ErrorReply], None] | None]] = {}
         self._pending_lock = threading.Lock()
         self._write_lock = threading.Lock()
-        self._handle: StreamHandle | None = None
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
 
-    def start(self) -> StreamHandle:
-        """Begin the background read loop."""
-        self._handle = self._io.stream(
-            self._read_loop,
-            on_item=self._dispatch,
-            coalesce=False,
-        )
-        return self._handle
+    def start(self) -> None:
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="svc-pipe-reader")
+        self._thread.start()
 
     def stop(self) -> None:
-        """Stop the read loop and block until the reader thread exits."""
-        if self._handle is not None:
-            self._handle.stop_event.set()
-            self._handle.future.result()
-            self._handle = None
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join()
+            self._thread = None
 
     def send(self, msg: Message) -> None:
-        """Fire-and-forget: encode and write msg to the pipe."""
         with self._write_lock:
             self._conn.send_bytes(encode(msg))
 
@@ -77,19 +67,18 @@ class ServicePipelineConnector:
         on_reply: Callable[[TReply], None],
         on_error: Callable[[ErrorReply], None] | None = None,
     ) -> None:
-        """Send a Request and register reply callbacks keyed by msg.id."""
         with self._pending_lock:
             self._pending[msg.id] = (on_reply, on_error)  # type: ignore[assignment]
         with self._write_lock:
             self._conn.send_bytes(encode(msg))
 
-    def _read_loop(self, stop: threading.Event) -> Iterator[Message]:
-        while not stop.is_set():
+    def _run(self) -> None:
+        while not self._stop.is_set():
             try:
                 if self._conn.poll(_POLL_TIMEOUT):
                     data = self._conn.recv_bytes()
                     try:
-                        yield decode(data)
+                        self._dispatch(decode(data))
                     except Exception:
                         log.exception("ServicePipelineConnector: decode error")
             except EOFError:

@@ -8,7 +8,6 @@ from abc import ABC, abstractmethod
 from multiprocessing import Pipe
 from typing import TYPE_CHECKING
 
-from base_core.framework.concurrency.task_runner import TaskRunner
 from base_core.framework.events.event_bus import EventBus
 from base_core.ipc.service_connector import ServicePipelineConnector
 
@@ -47,11 +46,9 @@ class SubprocessService(ABC):
     def __init__(
         self,
         bus: EventBus,
-        io: TaskRunner,
         python_exe: str | None = None,
     ) -> None:
         self._bus = bus
-        self._io = io
         self._python_exe = python_exe or sys.executable
         self._service_bus = EventBus()
         self._connector: ServicePipelineConnector | None = None
@@ -110,7 +107,6 @@ class SubprocessService(ABC):
         self._connector = ServicePipelineConnector(
             parent_conn,
             service_bus=self._service_bus,
-            io=self._io,
         )
         self._process = subprocess.Popen(
             [self._python_exe, "-m", self._entry_module, str(child_fd)],

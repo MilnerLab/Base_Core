@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 import threading
+import typing
 from collections import deque
-from typing import Callable, Generic, TypeVar
+from typing import Callable, ClassVar, Generic, TypeVar
 
 from base_core.framework.events.event_bus import EventBus
 from base_core.framework.shm.messages import ItemAvailable, SlotGrant
@@ -23,6 +24,10 @@ class WriterWorker(ProducingThreadedWorker, Generic[TBuffer]):
     only need to implement the acquisition logic. Buffer attachment remains at
     the BaseSubprocessMain level — this worker receives the buffer via the
     injected get_buffer callable.
+
+    _buffer_cls is set automatically from the type parameter at class definition:
+        class MyWorker(WriterWorker[MyBuffer]): ...
+        # MyWorker._buffer_cls is MyBuffer — no need to pass it to __init__
 
     Subclass pattern:
         class MyWorker(WriterWorker[MyBuffer]):
@@ -50,16 +55,28 @@ class WriterWorker(ProducingThreadedWorker, Generic[TBuffer]):
                 self._notify_written(slot, self._item_id, data.timestamp_ns)
     """
 
+    _buffer_cls: ClassVar[type]
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        super().__init_subclass__(**kwargs)
+        for base in getattr(cls, "__orig_bases__", ()):
+            origin = typing.get_origin(base)
+            if origin is WriterWorker or (
+                isinstance(origin, type) and issubclass(origin, WriterWorker)
+            ):
+                args = typing.get_args(base)
+                if args:
+                    cls._buffer_cls = args[0]
+                    break
+
     def __init__(
         self,
         worker_id: str,
         bus: EventBus,
         connector: SubprocessPipelineConnector,
-        buffer_cls: type[TBuffer],
         get_buffer: Callable[[], TBuffer],
     ) -> None:
         super().__init__(worker_id, bus, connector)
-        self._buffer_cls = buffer_cls
         self._get_buffer_fn = get_buffer
         self._granted: deque[int] = deque()
         self._granted_lock = threading.Lock()
