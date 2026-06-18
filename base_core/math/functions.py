@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from math import factorial, pi
 from typing import Mapping, Sequence
 
+from base_core.quantities import constants
 import numpy as np
 from scipy.special import lpmv
 
@@ -19,79 +20,43 @@ def gaussian(x: Sequence[float], A, x0, sigma, offset):
     
     return A * np.exp(-((xs - x0) ** 2) / (2 * sigma ** 2)) + offset
 
-#def erfc(x: Sequence[float], sigma, )
-
-def usCFG_projection(
-    wavelengths: Sequence[float],
-    carrier_wavelength: float,
-    starting_wavelength: float,
-    bandwidth: float,
-    baseline: float,
-    phase: float,
-    acceleration: float) -> list[float]:
-    wavelengths_np = np.array(wavelengths, dtype=float)
-    sigma = bandwidth / np.sqrt(8*np.log(2))
-    # maybe not square gaussian
-    return baseline + (1-baseline) * (gaussian(wavelengths, 1, carrier_wavelength, sigma, 0) * np.sin(phase + acceleration * (wavelengths_np - starting_wavelength)**2))**2
-
-def cfCFG_projection(
-#S = const +  (1-const)*(Gaussian(lambda - carrier,FWHM)*sin(phase + average*(lambda - carrier) + acceleration*(lambda - carrier)^3 )^2 )
-    wavelengths: Sequence[float],
-    carrier_wavelength: float,
-    average_frequency: float,
-    bandwidth: float,
-    baseline: float,
-    phase: float,
-    acceleration: float) -> list[float]:
-    wavelengths_np = np.array(wavelengths, dtype=float)
-    sigma = bandwidth / np.sqrt(8*np.log(2))
-    # maybe not square gaussian
-    return baseline + (1-baseline) * (gaussian(wavelengths, 1, carrier_wavelength, sigma, 0) * np.sin(phase + average_frequency*(wavelengths_np - carrier_wavelength) + acceleration * (wavelengths_np - carrier_wavelength)**3))**2
-
-def cfg_projection_nu_equal_amplitudes_safe(
-    wavelengths_nm: Sequence[float],
-    # envelope parameters (your gaussian in λ)
-    central_wavelength: float,
-    bandwidth: float,
-    # measurement/model parameters
-    baseline: float,
-    phase: float,
-    tau_ps: float,
-    a_R_THz_per_ps: float,
-    a_L_THz_per_ps: float,
-) -> np.ndarray:
+def cfg_spectrum(lam, A, dphi0, delta_z, delta_beta, offset,
+                 lambda0, delta_lambda_fwhm):
     """
-    Uses your Gaussian as INTENSITY envelope in λ.
-    Computes oscillation phase in ν-domain safely using THz/ps.
+    Centrifuge interference spectrum as a function of wavelength.
+
+    Inputs
+    ------
+    lam               : wavelength axis [nm]
+    A                 : amplitude (absorbs factor 4 and |E|^2)
+    dphi0             : relative phase phi_R0 - phi_L0 [rad]
+    delta_z           : arm path-length difference (z_R - z_L) [mm]; tau = delta_z / c
+    dbeta2            : spectral GDD difference beta2_R - beta2_L [ps^2]
+    offset            : detector background
+    lambda0           : central wavelength [nm]   (fix)
+    delta_lambda_fwhm : FWHM bandwidth [nm]        (fix)
+
+    The quadratic phase lives in angular frequency, so the wavelength axis is
+    converted to omega internally. The spectral envelope is Gaussian in omega
+    (not in lambda). Fixing lambda0 and delta_lambda_fwhm leaves A, dphi0,
+    delta_z, dbeta2, offset free.
     """
-    env_sigma_nm = bandwidth / np.sqrt(8*np.log(2))
-    lam_nm = np.asarray(wavelengths_nm, dtype=float)
-    baseline = float(np.clip(baseline, 0.0, 0.999999))
+    omega  = 2.0 * np.pi * SPEED_OF_LIGHT / lam       # rad/ps
+    omega0 = 2.0 * np.pi * SPEED_OF_LIGHT / lambda0   # rad/ps
 
-    if a_R_THz_per_ps == 0.0 or a_L_THz_per_ps == 0.0:
-        raise ValueError("a_R_THz_per_ps and a_L_THz_per_ps must be nonzero.")
+    # FWHM bandwidth [nm] -> spectral intensity std [rad/ps]
+    domega_fwhm = 2.0 * np.pi * SPEED_OF_LIGHT / lambda0**2 * delta_lambda_fwhm
+    sigma_w     = domega_fwhm / (2.0 * np.sqrt(2.0 * np.log(2.0)))
 
-    # Intensity envelope vs λ using your gaussian
-    I_env = gaussian(lam_nm, 1, central_wavelength, env_sigma_nm, 0)
-    I_env = np.clip(I_env, 0.0, None)  # avoid negative intensities
+    Omega = omega - omega0
+    tau   = delta_z / SPEED_OF_LIGHT                  # ps
+    env   = A * np.exp(-Omega**2 / (2.0 * sigma_w**2))
+    Theta = dphi0 - tau * Omega + 0.5 * delta_beta * Omega**2
+    return env * np.cos(Theta / 2.0)**2 + offset
 
-    # ν in THz (Fourier variable)
-    nu_thz = (SPEED_OF_LIGHT / (lam_nm * 1e-9)) * 1e-12
-    nu0_thz = (SPEED_OF_LIGHT / (central_wavelength * 1e-9)) * 1e-12  # reference at envelope center
-    dnu_thz = nu_thz - nu0_thz
-
-    # Chirp spectral phases (linear chirp model, no TOD)
-    Phi_R = np.pi * (dnu_thz ** 2) / a_R_THz_per_ps
-    Phi_L = np.pi * (dnu_thz ** 2) / a_L_THz_per_ps
-
-    # Relative phase controlling the horizontal projection oscillation
-    DeltaPhi = (Phi_R - Phi_L) + 2.0 * np.pi * nu_thz * tau_ps + phase
-
-    modulation = 0.5 * (1.0 + np.cos(DeltaPhi))  # in [0,1]
-
-    I = baseline + (1.0 - baseline) * (I_env * modulation)
-    return I
-
+def cfCFG_spectrum(lam, A, dphi0, delta_z, offset,
+                 lambda0, delta_lambda_fwhm):
+    return cfg_spectrum(lam, A, dphi0, delta_z, 0, offset, lambda0, delta_lambda_fwhm)
 
 @dataclass(frozen=True, slots=True)
 class SphericalHarmonic:
