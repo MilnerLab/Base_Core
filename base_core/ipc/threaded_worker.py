@@ -4,8 +4,8 @@ ThreadedWorker and ProducingThreadedWorker — per-worker serial dispatch.
 In a subprocess with multiple workers all sharing a single EventBus, the connector
 poll thread calls bus.publish() synchronously, so a slow handler in one worker blocks
 every other worker.  These classes fix that by dispatching each callback onto the
-worker's own TaskRunner(ThreadPoolExecutor(max_workers=1)), so the poll thread returns
-immediately and workers process commands serially but independently.
+worker's own TaskRunner, so the poll thread returns immediately and workers process
+commands serially but independently.
 
 Usage
 -----
@@ -25,17 +25,14 @@ Continuous-acquisition workers (spectrometer, oscilloscope):
             self._start_producing(self._acquire_producer, on_item=self._on_acquired)
 
         def _stop(self) -> None:
-            fut = self._prod_handle.future if self._prod_handle else None
-            self._stop_producing()
-            if fut is not None:
-                fut.result(timeout=5.0)   # wait before closing hardware
+            handle = self._stop_producing()
+            if handle:
+                handle.wait(timeout=5.0)   # drain before closing hardware
             ...
 """
 from __future__ import annotations
 
 import logging
-import threading
-from concurrent.futures import ThreadPoolExecutor
 from functools import wraps
 from typing import Callable, Iterable, TypeVar
 
@@ -54,9 +51,8 @@ T = TypeVar("T")
 def worker_thread(fn: Callable) -> Callable:
     """Dispatch a ThreadedWorker method onto the worker's own serial TaskRunner.
 
-    Mirrors @ui_thread (base_qt): the target runner is looked up on *self* at call
-    time, not at decoration time.  The calling thread (connector poll loop) returns
-    immediately; the method body runs on the worker's dedicated thread.
+    The calling thread (connector poll loop) returns immediately; the method body
+    runs on the worker's dedicated thread.
     """
     @wraps(fn)
     def wrapper(self: ThreadedWorker, *args, **kwargs) -> None:
@@ -73,13 +69,10 @@ class ThreadedWorker(BaseWorker):
     """
     BaseWorker that dispatches all event callbacks onto its own serial TaskRunner.
 
-    Adds a ThreadPoolExecutor(max_workers=1) so commands for this worker are
-    processed one-at-a-time on a dedicated thread in arrival order, without
-    blocking other workers that share the subprocess.
+    Commands for this worker are processed one-at-a-time on a dedicated thread in
+    arrival order, without blocking other workers that share the subprocess.
 
-    Concrete subclasses decorate domain handlers with @worker_thread.  The three
-    lifecycle handlers are already overridden here so _start/_stop/_reset also run
-    on the worker thread.
+    Concrete subclasses decorate domain handlers with @worker_thread.
     """
 
     def __init__(
@@ -89,14 +82,11 @@ class ThreadedWorker(BaseWorker):
         connector: SubprocessPipelineConnector,
     ) -> None:
         super().__init__(worker_id, bus, connector)
-        self._exec = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix=f"worker.{worker_id}"
-        )
-        self._runner = TaskRunner(self._exec)
+        self._runner = TaskRunner(name=f"worker.{worker_id}")
 
     def deactivate(self) -> None:
         super().deactivate()  # unsubscribes all handlers first
-        self._exec.shutdown(wait=False)
+        self._runner.shutdown(wait=False)
 
     @worker_thread
     def _on_start_cmd(self, msg: StartWorker) -> None:
@@ -123,10 +113,9 @@ class ProducingThreadedWorker(ThreadedWorker):
             self._start_producing(self._my_producer, on_item=self._on_item)
 
         def _stop(self) -> None:
-            fut = self._prod_handle.future if self._prod_handle else None
-            self._stop_producing()
-            if fut is not None:
-                fut.result(timeout=5.0)   # drain before closing hardware
+            handle = self._stop_producing()
+            if handle:
+                handle.wait(timeout=5.0)   # drain before closing hardware
             self._device.close()
     """
 
@@ -137,15 +126,12 @@ class ProducingThreadedWorker(ThreadedWorker):
         connector: SubprocessPipelineConnector,
     ) -> None:
         super().__init__(worker_id, bus, connector)
-        self._prod_exec = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix=f"worker.{worker_id}.prod"
-        )
-        self._prod_runner = TaskRunner(self._prod_exec)
+        self._prod_runner = TaskRunner(name=f"worker.{worker_id}.prod")
         self._prod_handle: StreamHandle | None = None
 
     def _start_producing(
         self,
-        producer: Callable[[threading.Event], Iterable[T]],
+        producer: Callable[[any], Iterable[T]],
         *,
         on_item: Callable[[T], None],
         on_error: Callable[[BaseException], None] | None = None,
@@ -157,16 +143,17 @@ class ProducingThreadedWorker(ThreadedWorker):
             on_item=on_item,
             on_error=on_error,
             on_complete=on_complete,
-            coalesce=False,
         )
 
-    def _stop_producing(self) -> None:
-        """Signal the production stream to stop (non-blocking). Clears _prod_handle."""
-        if self._prod_handle is not None:
-            self._prod_handle.stop()
+    def _stop_producing(self) -> StreamHandle | None:
+        """Signal the production stream to stop. Returns the handle to wait on."""
+        handle = self._prod_handle
+        if handle is not None:
+            handle.stop()
             self._prod_handle = None
+        return handle
 
     def deactivate(self) -> None:
         self._stop_producing()
         super().deactivate()
-        self._prod_exec.shutdown(wait=False)
+        self._prod_runner.shutdown(wait=False)

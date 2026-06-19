@@ -76,8 +76,7 @@ class WriterWorkerHandle(BaseWorkerHandle, Generic[TBuffer, TAvailable, TAck]):
     def _on_attached(self) -> None:
         self._subscribe_service(ItemAvailable, self._on_item_available)
         self._coordinator.start(on_slot_freed=self._on_slot_freed)
-        for slot in range(self._spec.slot_count):
-            self._emit(SlotGrant(buffer_class_name=self._buffer_cls.__name__, slot=slot))
+        self._emit(SlotGrant(buffer_class_name=self._buffer_cls.__name__, slot=self._coordinator.shadow))
 
     def _on_detached(self) -> None:
         self._coordinator.stop()

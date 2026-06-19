@@ -1,15 +1,37 @@
-from abc import ABC, abstractmethod
+from __future__ import annotations
 
-from base_core.framework.concurrency.task_runner import TaskRunner
-from base_core.framework.events.event_bus import EventBus
+from abc import ABC, abstractmethod
 
 
 class Step(ABC):
-    def __init__(self, bus: EventBus, io: TaskRunner) -> None:
-        self._bus = bus
-        self._io = io
+    """
+    A discrete phase of a BaseRoutine.
+
+    Each step declares its own slot number, which determines its position in the
+    routine's execution order regardless of the order add_step() is called.
+
+    All lifecycle methods are called on the routine's own thread.
+    """
+
+    def __init__(self, slot: int) -> None:
+        self._slot = slot
+
+    @property
+    def slot(self) -> int:
+        return self._slot
+
+    @property
+    def name(self) -> str:
+        return type(self).__name__
+
+    @abstractmethod
+    def start(self) -> None:
+        """Enter this step."""
 
     @abstractmethod
     def stop(self) -> None:
-        """Stop this step. Safe to call even if the step is not currently running."""
-        ...
+        """Leave this step (advance or revert)."""
+
+    @abstractmethod
+    def reset(self) -> None:
+        """Reset this step to its initial state without leaving it."""
