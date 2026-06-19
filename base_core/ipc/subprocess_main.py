@@ -88,6 +88,18 @@ class BaseSubprocessMain(ABC):
             return
 
         self.connector.run(stop_event)
+        self._teardown()
+
+    def _teardown(self) -> None:
+        """Called after the read loop exits (SIGTERM or pipe close).
+        Calls _shutdown() on every registered worker so hardware is released cleanly."""
+        for worker in self._workers.values():
+            try:
+                worker._shutdown()
+            except Exception:
+                log.exception("Error in %r._shutdown()", worker.worker_id)
+        for worker in self._workers.values():
+            worker.deactivate()
 
     def _on_attach_buffer(self, msg: AttachBuffer) -> None:  # type: ignore[name-defined]
         cls = self._buffer_classes.get(msg.buffer_class_name)

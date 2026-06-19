@@ -24,7 +24,7 @@ Continuous-acquisition workers (spectrometer, oscilloscope):
             ...
             self._start_producing(self._acquire_producer, on_item=self._on_acquired)
 
-        def _stop(self) -> None:
+        def _pause(self) -> None:
             handle = self._stop_producing()
             if handle:
                 handle.wait(timeout=5.0)   # drain before closing hardware
@@ -41,7 +41,7 @@ from base_core.framework.concurrency.task_runner import TaskRunner
 from base_core.framework.events.event_bus import EventBus
 from base_core.ipc.subprocess_connector import SubprocessPipelineConnector
 from base_core.ipc.worker import BaseWorker
-from base_core.ipc.worker_messages import ResetWorker, StartWorker, StopWorker
+from base_core.ipc.worker_messages import PauseWorker, ResetWorker, StartWorker
 
 log = logging.getLogger(__name__)
 
@@ -93,8 +93,8 @@ class ThreadedWorker(BaseWorker):
         super()._on_start_cmd(msg)
 
     @worker_thread
-    def _on_stop_cmd(self, msg: StopWorker) -> None:
-        super()._on_stop_cmd(msg)
+    def _on_pause_cmd(self, msg: PauseWorker) -> None:
+        super()._on_pause_cmd(msg)
 
     @worker_thread
     def _on_reset_cmd(self, msg: ResetWorker) -> None:
@@ -112,7 +112,7 @@ class ProducingThreadedWorker(ThreadedWorker):
             self._device.open()
             self._start_producing(self._my_producer, on_item=self._on_item)
 
-        def _stop(self) -> None:
+        def _pause(self) -> None:
             handle = self._stop_producing()
             if handle:
                 handle.wait(timeout=5.0)   # drain before closing hardware

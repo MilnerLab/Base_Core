@@ -9,6 +9,7 @@ from multiprocessing import Pipe
 from typing import TYPE_CHECKING
 
 from base_core.framework.events.event_bus import EventBus
+from base_core.framework.shm.writer_worker_handle import WriterWorkerHandle
 from base_core.ipc.service_connector import ServicePipelineConnector
 
 if TYPE_CHECKING:
@@ -67,7 +68,7 @@ class SubprocessService(ABC):
         return self._service_bus
 
     def add_handle(self, handle: BaseWorkerHandle) -> None:
-        """Register a worker handle. _on_attached/_on_detached are called on start/stop."""
+        """Register a worker handle. subscribe()/cleanup are called on start/stop."""
         self._worker_handles.append(handle)
 
     def add_buffer(
@@ -117,7 +118,6 @@ class SubprocessService(ABC):
 
         for handle in self._worker_handles:
             handle._bind(self._connector, self._service_bus)
-            handle._on_pre_attach()
 
         # AttachBuffer for every registered buffer (FIFO ordering with slot grants guaranteed)
         if self._attach_buffers:
@@ -132,7 +132,8 @@ class SubprocessService(ABC):
                 )
 
         for handle in self._worker_handles:
-            handle._on_attached()
+            if isinstance(handle, WriterWorkerHandle):
+                handle._on_attached()
 
     def stop(self) -> None:
         """Stop the read loop, terminate and join the subprocess."""

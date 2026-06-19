@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, Generic, TypeVar
+from typing import Any, Callable, Generic, TypeVar
 
 from base_core.framework.events.event_bus import EventBus
 from base_core.framework.shm.buffer import SharedMemoryBuffer
@@ -29,10 +29,10 @@ class WriterWorkerHandle(BaseWorkerHandle, Generic[TBuffer, TAvailable, TAck]):
         service.add_handle(handle)
 
     Lifecycle (driven by SubprocessService):
-      _bind(connector, service_bus)
-      _on_pre_attach()   → create buffer in shared memory
+      _bind(connector, service_bus)  → inject connector, create buffer (subscribe deferred)
       [AttachBuffer sent to subprocess]
-      _on_attached()     → subscribe ItemAvailable, start coordinator, grant all slots
+      _on_attached()     → subscribe ItemAvailable, start coordinator, grant initial slots,
+                           then call self.subscribe() for concrete subclass subscriptions
       _unbind()          → stop coordinator, unsubscribe, close+unlink buffer
 
     Consumer registration (called by read-only consumers, e.g. PhaseControlService):
@@ -47,14 +47,17 @@ class WriterWorkerHandle(BaseWorkerHandle, Generic[TBuffer, TAvailable, TAck]):
         spec: MemorySpec,
         make_available: Callable[[int, int, int], TAvailable],
         ack_type: type[TAck],
+        *,
+        state_event: Callable[[], Any] | None = None,
     ) -> None:
-        super().__init__(worker_id, bus)
+        super().__init__(worker_id, bus, state_event=state_event)
         self._buffer_cls = buffer_cls
         self._spec = spec
         self._coordinator: SlotCoordinator[TAvailable, TAck] = SlotCoordinator(
             spec, worker_id, bus, make_available, ack_type
         )
         self._writer_buffer: TBuffer | None = None
+        self._unsub_item: Callable[[], None] = None
 
     @property
     def spec(self) -> MemorySpec:
@@ -70,17 +73,23 @@ class WriterWorkerHandle(BaseWorkerHandle, Generic[TBuffer, TAvailable, TAck]):
     # Lifecycle hooks
     # ------------------------------------------------------------------
 
-    def _on_pre_attach(self) -> None:
+    def _bind(self, connector, service_bus) -> None:  # type: ignore[override]
+        # Don't call super()._bind() — subscribe() is deferred to _on_attached() so it runs
+        # after the subprocess has attached the shared-memory buffer.
+        self._connector = connector
+        self._service_bus = service_bus
         self._writer_buffer = self._buffer_cls.create(self._spec)
 
     def _on_attached(self) -> None:
-        self._subscribe_service(ItemAvailable, self._on_item_available)
+        self._unsub_item = self._service_bus.subscribe(ItemAvailable, self._on_item_available)
         self._coordinator.start(on_slot_freed=self._on_slot_freed)
         self._emit(SlotGrant(buffer_class_name=self._buffer_cls.__name__, slot=self._coordinator.shadow))
+        self.subscribe()
 
-    def _on_detached(self) -> None:
+    def _unbind(self) -> None:
         self._coordinator.stop()
-        super()._on_detached()  # clears _unsubs (unsubscribes ItemAvailable)
+        self._unsub_item()
+        super()._unbind()  # clears subscriptions, connector, service_bus
         if self._writer_buffer is not None:
             self._writer_buffer.unlink()
             self._writer_buffer.close()

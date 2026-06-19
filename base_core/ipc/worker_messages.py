@@ -14,7 +14,7 @@ class StartWorker(Request[OKReply]):
 
 @register
 @dataclass(frozen=True)
-class StopWorker(Request[OKReply]):
+class PauseWorker(Request[OKReply]):
     worker_id: str = ""
 
 
