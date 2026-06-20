@@ -72,7 +72,10 @@ class TaskRunner:
         item queue and calls on_item for every item in arrival order.
 
         Returns a StreamHandle whose stop_event signals the producer to exit and whose
-        done_event is set once the producer's finally block completes.
+        done_event is set once the consumer has drained all remaining items (including
+        any item that was in-flight when stop was signalled). Callers that stop the
+        stream and need to reclaim resources (e.g. hardware or shared-memory slots)
+        should wait on done_event before doing so.
         """
         stop_event = threading.Event()
         done_event = threading.Event()
@@ -80,13 +83,19 @@ class TaskRunner:
         _DONE_ITEM = object()
 
         def consumer_loop() -> None:
-            while True:
-                item = item_queue.get()
-                if item is _DONE_ITEM:
-                    if on_complete is not None:
-                        on_complete()
-                    return
-                on_item(item)  # type: ignore[arg-type]
+            try:
+                while True:
+                    item = item_queue.get()
+                    if item is _DONE_ITEM:
+                        if on_complete is not None:
+                            on_complete()
+                        return
+                    on_item(item)  # type: ignore[arg-type]
+            finally:
+                # Set after all items (including the one in-flight at stop time)
+                # have been processed. This guarantees that shared resources
+                # touched by on_item are released before handle.wait() returns.
+                done_event.set()
 
         consumer_thread = threading.Thread(
             target=consumer_loop, daemon=True, name=f"{self._name}.consumer"
@@ -96,9 +105,9 @@ class TaskRunner:
             consumer_thread.start()
             try:
                 for item in producer(stop_event):
+                    item_queue.put(item)  # enqueue before checking stop
                     if stop_event.is_set():
                         break
-                    item_queue.put(item)
             except BaseException as exc:
                 if on_error is not None:
                     on_error(exc)
@@ -106,7 +115,6 @@ class TaskRunner:
                     log.exception("TaskRunner stream producer error in %s", self._name)
             finally:
                 item_queue.put(_DONE_ITEM)
-                done_event.set()
 
         self._queue.put(producer_loop)
         return StreamHandle(stop_event=stop_event, done_event=done_event)

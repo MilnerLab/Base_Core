@@ -84,7 +84,6 @@ class WriterWorkerHandle(BaseWorkerHandle, Generic[TBuffer, TAvailable, TAck]):
         self._unsub_item = self._service_bus.subscribe(ItemAvailable, self._on_item_available)
         self._coordinator.start(on_slot_freed=self._on_slot_freed)
         self._emit(SlotGrant(buffer_class_name=self._buffer_cls.__name__, slot=self._coordinator.shadow))
-        self.subscribe()
 
     def _unbind(self) -> None:
         self._coordinator.stop()

@@ -31,15 +31,19 @@ class ServicePipelineConnector:
     - The read loop runs on a single daemon thread spawned by start().
     - send()/request() acquire a write lock so concurrent callers don't interleave bytes.
     - Reply callbacks are invoked on the reader thread.
+    - on_disconnect (optional) is called once from the reader thread when the connection
+      is lost unexpectedly (EOFError / OSError). Not called on a clean stop().
     """
 
     def __init__(
         self,
         conn: Connection,
         service_bus: EventBus,
+        on_disconnect: Callable[[], None] | None = None,
     ) -> None:
         self._conn = conn
         self._service_bus = service_bus
+        self._on_disconnect = on_disconnect
         self._pending: dict[str, tuple[Callable[[Reply], None], Callable[[ErrorReply], None] | None]] = {}
         self._pending_lock = threading.Lock()
         self._write_lock = threading.Lock()
@@ -83,9 +87,13 @@ class ServicePipelineConnector:
                         log.exception("ServicePipelineConnector: decode error")
             except EOFError:
                 log.debug("ServicePipelineConnector: connection closed by subprocess")
+                if self._on_disconnect is not None:
+                    self._on_disconnect()
                 return
             except OSError:
                 log.exception("ServicePipelineConnector: connection error")
+                if self._on_disconnect is not None:
+                    self._on_disconnect()
                 return
 
     def _dispatch(self, msg: Message) -> None:

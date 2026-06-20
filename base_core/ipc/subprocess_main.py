@@ -123,9 +123,13 @@ class BaseSubprocessMain(ABC):
         then creates and runs an instance of this class.
         """
         if len(sys.argv) < 2:
-            log.error("%s.main(): expected FD as first argument", cls.__name__)
+            log.error("%s.main(): expected port as first argument", cls.__name__)
             sys.exit(1)
 
-        fd = int(sys.argv[1])
-        conn = Connection(fd)
+        import socket as _socket
+
+        port = int(sys.argv[1])
+        sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        sock.connect(('127.0.0.1', port))
+        conn = Connection(sock.detach())
         cls(conn).run()

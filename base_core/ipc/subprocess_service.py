@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import logging
-import os
+import socket as _socket
 import subprocess
 import sys
 from abc import ABC, abstractmethod
-from multiprocessing import Pipe
+from multiprocessing.connection import Connection as _MpConnection
 from typing import TYPE_CHECKING
 
 from base_core.framework.events.event_bus import EventBus
@@ -101,19 +101,32 @@ class SubprocessService(ABC):
             log.warning("%s.start() called while already running", type(self).__name__)
             return
 
-        parent_conn, child_conn = Pipe()
-        child_fd = child_conn.fileno()
-        os.set_inheritable(child_fd, True)
+        srv = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+        srv.bind(('127.0.0.1', 0))
+        srv.listen(1)
+        port = srv.getsockname()[1]
+        srv.settimeout(10.0)
+
+        self._process = subprocess.Popen(
+            [self._python_exe, "-m", self._entry_module, str(port)],
+        )
+
+        try:
+            client_sock, _ = srv.accept()
+        finally:
+            srv.close()
+
+        handles = list(self._worker_handles)
+
+        def _on_disconnect() -> None:
+            for handle in handles:
+                handle._on_disconnect()
 
         self._connector = ServicePipelineConnector(
-            parent_conn,
+            _MpConnection(client_sock.detach()),
             service_bus=self._service_bus,
+            on_disconnect=_on_disconnect,
         )
-        self._process = subprocess.Popen(
-            [self._python_exe, "-m", self._entry_module, str(child_fd)],
-            close_fds=False,
-        )
-        child_conn.close()
         self._connector.start()
 
         for handle in self._worker_handles:

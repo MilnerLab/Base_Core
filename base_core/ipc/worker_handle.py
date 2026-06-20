@@ -204,3 +204,15 @@ class BaseWorkerHandle(Generic[TEvent]):
         self.unsubscribe()
         self._connector = None
         self._service_bus = None
+
+    def _on_disconnect(self) -> None:
+        """Called when the subprocess connection is lost unexpectedly.
+
+        Clears pending requests (no replies will ever arrive) and resets visible
+        state to NEW so the UI unlocks. Also unsubscribes domain handlers so a
+        stale config-change event cannot try to send on a dead connector.
+        """
+        self.unsubscribe()
+        with self._pending_lock:
+            self._pending_count = 0
+        self._worker_state._set(WorkerStatus.NEW)
