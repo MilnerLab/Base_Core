@@ -77,13 +77,6 @@ class Range(Generic[T], PrimitiveSerde):
     def is_in_range(self, value: T, *, inclusive: bool = True) -> bool:
         return (self.min <= value <= self.max) if inclusive else (self.min < value < self.max)
 
-    # --- serialization (no hardcoded "min"/"max") ---
-    def to_primitive(self) -> dict[str, Primitive]:
-        return {f.name: getattr(self, f.name) for f in fields(self)}
-
-    @classmethod
-    def from_primitive(cls, v: Primitive) -> "Range":
-        return cls(**{f.name: v[f.name] for f in fields(cls)})
 
 @dataclass(slots=True)
 class Point(PrimitiveSerde):
