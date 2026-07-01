@@ -183,9 +183,9 @@ class BaseWorkerHandle(Generic[TEvent]):
         """Subscribe to domain events on the global bus. Cleared automatically on stop."""
         self._unsubs.append(self._bus.subscribe(event_type, handler))
 
-    def _subscribe_service(self, event_type: type[T], handler: Callable[[T], None]) -> None:
+    def _subscribe_service(self, message_type: type[T], handler: Callable[[T], None]) -> None:
         """Subscribe to spontaneous IPC events from the subprocess. Cleared automatically on stop."""
-        self._unsubs.append(self._service_bus.subscribe(event_type, handler))  # type: ignore[union-attr]
+        self._unsubs.append(self._service_bus.subscribe(message_type, handler))  # type: ignore[union-attr]
 
     def _on_error(self, reply: ErrorReply) -> None:
         """Default error handler. Override for custom behaviour."""

@@ -20,43 +20,33 @@ def gaussian(x: Sequence[float], A, x0, sigma, offset):
     
     return A * np.exp(-((xs - x0) ** 2) / (2 * sigma ** 2)) + offset
 
-def cfg_spectrum(lam, A, dphi0, delta_z, delta_beta, offset,
+def spectrum_fit(lam, A, theta0, theta1, theta2, V, offset,
                  lambda0, delta_lambda_fwhm):
     """
-    Centrifuge interference spectrum as a function of wavelength.
+    Direct-polynomial interference spectrum vs wavelength.
 
-    Inputs
-    ------
+    Theta(Omega) = theta0 + theta1*Omega + theta2*Omega^2
+    I = A * env * (1 + V * cos(Theta)) + offset
+
     lam               : wavelength axis [nm]
-    A                 : amplitude (absorbs factor 4 and |E|^2)
-    dphi0             : relative phase phi_R0 - phi_L0 [rad]
-    delta_z           : arm path-length difference (z_R - z_L) [mm]; tau = delta_z / c
-    dbeta2            : spectral GDD difference beta2_R - beta2_L [ps^2]
+    A                 : mean-fringe amplitude; peak = A*(1+V)+offset
+    theta0            : constant phase offset [rad]
+    theta1            : linear phase coeff [ps]   (approx -tau)
+    theta2            : quadratic phase coeff [ps^2] (approx 0.5*delta_beta)
+    V                 : fringe visibility [0, 1]
     offset            : detector background
-    lambda0           : central wavelength [nm]   (fix)
-    delta_lambda_fwhm : FWHM bandwidth [nm]        (fix)
-
-    The quadratic phase lives in angular frequency, so the wavelength axis is
-    converted to omega internally. The spectral envelope is Gaussian in omega
-    (not in lambda). Fixing lambda0 and delta_lambda_fwhm leaves A, dphi0,
-    delta_z, dbeta2, offset free.
+    lambda0           : central wavelength [nm]   (typically fixed)
+    delta_lambda_fwhm : FWHM bandwidth [nm]        (typically fixed)
     """
-    omega  = 2.0 * np.pi * SPEED_OF_LIGHT / lam       # rad/ps
-    omega0 = 2.0 * np.pi * SPEED_OF_LIGHT / lambda0   # rad/ps
-
-    # FWHM bandwidth [nm] -> spectral intensity std [rad/ps]
+    omega  = 2.0 * np.pi * SPEED_OF_LIGHT / lam
+    omega0 = 2.0 * np.pi * SPEED_OF_LIGHT / lambda0
     domega_fwhm = 2.0 * np.pi * SPEED_OF_LIGHT / lambda0**2 * delta_lambda_fwhm
-    sigma_w     = domega_fwhm / (2.0 * np.sqrt(2.0 * np.log(2.0)))
-
+    sigma_w = domega_fwhm / (2.0 * np.sqrt(2.0 * np.log(2.0)))
     Omega = omega - omega0
-    tau   = delta_z / SPEED_OF_LIGHT                  # ps
     env   = A * np.exp(-Omega**2 / (2.0 * sigma_w**2))
-    Theta = dphi0 - tau * Omega + 0.5 * delta_beta * Omega**2
-    return env * np.cos(Theta / 2.0)**2 + offset
+    Theta = theta0 + theta1 * Omega + theta2 * Omega**2
+    return env * (1.0 + V * np.cos(Theta)) + offset
 
-def cfCFG_spectrum(lam, A, dphi0, delta_z, offset,
-                 lambda0, delta_lambda_fwhm):
-    return cfg_spectrum(lam, A, dphi0, delta_z, 0, offset, lambda0, delta_lambda_fwhm)
 
 @dataclass(frozen=True, slots=True)
 class SphericalHarmonic:
