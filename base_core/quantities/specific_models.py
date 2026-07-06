@@ -153,3 +153,26 @@ class AngularChirp(float, PrimitiveSerde):
     @classmethod
     def from_primitive(cls, v: Primitive) -> "AngularChirp":
         return cls(float(v))
+
+
+class GDD(float, PrimitiveSerde):
+    """
+    Group delay dispersion (quadratic spectral-phase coefficient). Internal unit: s^2.
+
+    Example:
+        GDD(0.05, time_prefix=Prefix.PICO)
+        represents 0.05 ps^2.
+    """
+
+    def __new__(cls, value: float, time_prefix: Prefix = Prefix.NONE):
+        return super().__new__(cls, float(value) * (time_prefix.value ** 2))
+
+    def value(self, time_prefix: Prefix = Prefix.NONE) -> float:
+        return float(self) / (time_prefix.value ** 2)
+
+    def to_primitive(self) -> float:
+        return float(self)  # s^2
+
+    @classmethod
+    def from_primitive(cls, v: Primitive) -> "GDD":
+        return cls(float(v))  # interpret as s^2

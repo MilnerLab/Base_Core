@@ -80,6 +80,7 @@ class BaseWorker(ABC):
         """Close hardware connections and release resources.
         Called by BaseSubprocessMain._teardown() when the subprocess exits.
         Override in concrete workers; default is a no-op."""
+        self.deactivate()
         pass
 
     # --- reply / notify helpers ----------------------------------------

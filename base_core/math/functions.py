@@ -38,9 +38,13 @@ def spectrum_fit(lam, A, theta0, theta1, theta2, V, offset,
     lambda0           : central wavelength [nm]   (typically fixed)
     delta_lambda_fwhm : FWHM bandwidth [nm]        (typically fixed)
     """
-    omega  = 2.0 * np.pi * SPEED_OF_LIGHT / lam
-    omega0 = 2.0 * np.pi * SPEED_OF_LIGHT / lambda0
-    domega_fwhm = 2.0 * np.pi * SPEED_OF_LIGHT / lambda0**2 * delta_lambda_fwhm
+    # 1e-3 converts SPEED_OF_LIGHT/lam (nm, SI c) into rad/ps, so theta1/theta2 are
+    # genuinely ps/ps^2 as documented above (equivalent to converting lam to meters
+    # and theta1/theta2 to seconds; this form keeps the ratio Omega/sigma_w, and
+    # hence the envelope shape, unaffected).
+    omega  = 2.0 * np.pi * SPEED_OF_LIGHT / lam * 1e-3
+    omega0 = 2.0 * np.pi * SPEED_OF_LIGHT / lambda0 * 1e-3
+    domega_fwhm = 2.0 * np.pi * SPEED_OF_LIGHT / lambda0**2 * delta_lambda_fwhm * 1e-3
     sigma_w = domega_fwhm / (2.0 * np.sqrt(2.0 * np.log(2.0)))
     Omega = omega - omega0
     env   = A * np.exp(-Omega**2 / (2.0 * sigma_w**2))
