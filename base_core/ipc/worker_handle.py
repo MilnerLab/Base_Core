@@ -8,7 +8,7 @@ from typing import Callable, Generic, TypeVar
 from base_core.framework.events.event_bus import EventBus
 from base_core.ipc.message import ErrorReply, Message, OKReply, Reply, Request
 from base_core.ipc.service_connector import ServicePipelineConnector
-from base_core.ipc.worker_messages import PauseWorker, ResetWorker, StartWorker
+from base_core.ipc.worker_messages import PauseWorker, ResumeWorker, StartWorker, StopWorker
 
 log = logging.getLogger(__name__)
 
@@ -18,9 +18,9 @@ TEvent = TypeVar("TEvent")
 
 
 class WorkerStatus(Enum):
-    NEW     = "new"      # initial state; also after reset()
-    RUNNING = "running"  # after start() confirmed
-    PAUSED  = "paused"   # after stop() confirmed
+    NEW     = "new"      # initial state; also after stop()
+    RUNNING = "running"  # after start() or resume() confirmed
+    PAUSED  = "paused"   # after pause() confirmed
     BUSY    = "busy"     # IPC request in-flight; restores to previous status on reply
 
 
@@ -111,9 +111,11 @@ class BaseWorkerHandle(Generic[TEvent]):
         self.unsubscribe()
         self._request(PauseWorker(worker_id=self._worker_id), self._on_pause_reply)
 
-    def reset(self) -> None:
-        # Always pause worker first
-        self._request(ResetWorker(worker_id=self._worker_id), self._on_reset_reply)
+    def resume(self) -> None:
+        self._request(ResumeWorker(worker_id=self._worker_id), self._on_resume_reply)
+
+    def stop(self) -> None:
+        self._request(StopWorker(worker_id=self._worker_id), self._on_stop_reply)
 
     def _on_start_reply(self, reply: OKReply) -> None:
         self.subscribe()
@@ -122,7 +124,11 @@ class BaseWorkerHandle(Generic[TEvent]):
     def _on_pause_reply(self, reply: OKReply) -> None:
         self._worker_state._set(WorkerStatus.PAUSED)
 
-    def _on_reset_reply(self, reply: OKReply) -> None:
+    def _on_resume_reply(self, reply: OKReply) -> None:
+        self.subscribe()
+        self._worker_state._set(WorkerStatus.RUNNING)
+
+    def _on_stop_reply(self, reply: OKReply) -> None:
         self._worker_state._set(WorkerStatus.NEW)
 
     # --- helpers for concrete subclasses --------------------------------

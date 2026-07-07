@@ -20,5 +20,11 @@ class PauseWorker(Request[OKReply]):
 
 @register
 @dataclass(frozen=True)
-class ResetWorker(Request[OKReply]):
+class ResumeWorker(Request[OKReply]):
+    worker_id: str = ""
+
+
+@register
+@dataclass(frozen=True)
+class StopWorker(Request[OKReply]):
     worker_id: str = ""
