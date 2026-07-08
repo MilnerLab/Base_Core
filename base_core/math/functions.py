@@ -53,26 +53,33 @@ def spectrum_fit(lam, A, theta0, theta1, theta2, V, offset,
     return env * (1.0 + V * np.cos(Theta)) + offset
 
 
-def spectrum_fit_skew(lam, R, L, theta0, theta1, theta2, alpha, epsilon, s, offset,
+def spectrum_fit_skew(lam, R, L, theta0, theta1, theta2,
+                      alpha_R, epsilon_R, s_R, alpha_L, epsilon_L, s_L, offset,
                       lambda0, delta_lambda_fwhm):
     """
-    Two-arm interference spectrum with a skewed second arm (eq:skewnorm, eq:V_skew).
+    Two-arm interference spectrum with an independently skewed R and L arm (eq:skewnorm, eq:V_skew).
 
-    Ghat(Omega)   = exp(-Omega^2/(2*sigma_w^2))                      (R arm, plain Gaussian)
-    Shat_a(Omega) = exp[-(Omega-eps)^2/(2s^2)]*[1+erf(a*(Omega-eps)/(sqrt2*s))] / S0   (eq:skewnorm, L arm)
-    B(Omega)      = R*Ghat(Omega) + L*Shat_a(Omega)
-    V(Omega)      = 2*sqrt(R*L*Ghat(Omega)*Shat_a(Omega)) / B(Omega)   (eq:V_skew)
+    Shat_a(Omega) = exp[-(Omega-eps)^2/(2s^2)]*[1+erf(a*(Omega-eps)/(sqrt2*s))] / S0   (eq:skewnorm)
+    B(Omega)      = R*Shat_{alpha_R}(Omega) + L*Shat_{alpha_L}(Omega)
+    V(Omega)      = 2*sqrt(R*L*Shat_{alpha_R}(Omega)*Shat_{alpha_L}(Omega)) / B(Omega)   (eq:V_skew)
     I             = B(Omega)*(1 + V(Omega)*cos(Theta(Omega))) + offset
 
+    Each arm reduces to a plain Gaussian at alpha=0, so alpha_R=alpha_L=0,
+    epsilon_R=epsilon_L=0, s_R=s_L=sigma_w recovers the original single-Gaussian,
+    constant-visibility spectrum_fit model exactly.
+
     lam               : wavelength axis [nm]
-    R                 : R-arm (reference/DA) amplitude; peak-normalized Ghat
-    L                 : L-arm (grating/GA) amplitude; peak-normalized Shat_a
+    R                 : R-arm (reference/DA) amplitude; peak-normalized Shat_{alpha_R}
+    L                 : L-arm (grating/GA) amplitude; peak-normalized Shat_{alpha_L}
     theta0            : constant phase offset [rad]
     theta1            : linear phase coeff [ps]   (approx -tau)
     theta2            : quadratic phase coeff [ps^2] (approx 0.5*delta_beta)
-    alpha             : L-arm skewness (alpha=0 recovers a Gaussian shape)
-    epsilon           : L-arm skew-normal location [rad/ps]
-    s                 : L-arm skew-normal scale [rad/ps]
+    alpha_R           : R-arm skewness (alpha_R=0 recovers a Gaussian shape)
+    epsilon_R         : R-arm skew-normal location [rad/ps]
+    s_R               : R-arm skew-normal scale [rad/ps]
+    alpha_L           : L-arm skewness (alpha_L=0 recovers a Gaussian shape)
+    epsilon_L         : L-arm skew-normal location [rad/ps]
+    s_L               : L-arm skew-normal scale [rad/ps]
     offset            : detector background
     lambda0           : central wavelength [nm]   (typically fixed)
     delta_lambda_fwhm : FWHM bandwidth [nm]        (typically fixed)
@@ -83,8 +90,6 @@ def spectrum_fit_skew(lam, R, L, theta0, theta1, theta2, alpha, epsilon, s, offs
     sigma_w = domega_fwhm / (2.0 * np.sqrt(2.0 * np.log(2.0)))
     Omega = omega - omega0
 
-    G_hat = np.exp(-Omega**2 / (2.0 * sigma_w**2))
-
     # Peak location z* of exp(-z^2/2)*(1+erf(a*z/sqrt2)) depends only on alpha
     # (shift/scale-invariant). Solving its stationarity condition directly is
     # numerically fragile (erf saturates to +-1 in float64 for moderately large
@@ -92,20 +97,34 @@ def spectrum_fit_skew(lam, R, L, theta0, theta1, theta2, alpha, epsilon, s, offs
     # true root), so maximize the shape itself instead: it is unimodal for
     # every real alpha, so a bounded 1D search is robust across the whole
     # range even as z* -> 0 for |a| -> infinity.
-    if alpha == 0.0:
-        z_star = 0.0
+
+    # --- R arm (eq:skewnorm) ---
+    if alpha_R == 0.0:
+        z_star_R = 0.0
     else:
-        def neg_shape(z):
-            return -(np.exp(-z**2 / 2.0) * (1.0 + erf(alpha * z / np.sqrt(2.0))))
-        z_star = minimize_scalar(neg_shape, bounds=(-8.0, 8.0), method="bounded").x
-    S0 = np.exp(-z_star**2 / 2.0) * (1.0 + erf(alpha * z_star / np.sqrt(2.0)))
+        def neg_shape_R(z):
+            return -(np.exp(-z**2 / 2.0) * (1.0 + erf(alpha_R * z / np.sqrt(2.0))))
+        z_star_R = minimize_scalar(neg_shape_R, bounds=(-8.0, 8.0), method="bounded").x
+    S0_R = np.exp(-z_star_R**2 / 2.0) * (1.0 + erf(alpha_R * z_star_R / np.sqrt(2.0)))
 
-    z = (Omega - epsilon) / s
-    S_hat = np.exp(-z**2 / 2.0) * (1.0 + erf(alpha * z / np.sqrt(2.0))) / S0
+    z_R = (Omega - epsilon_R) / s_R
+    S_hat_R = np.exp(-z_R**2 / 2.0) * (1.0 + erf(alpha_R * z_R / np.sqrt(2.0))) / S0_R
 
-    B = R * G_hat + L * S_hat
+    # --- L arm (eq:skewnorm) ---
+    if alpha_L == 0.0:
+        z_star_L = 0.0
+    else:
+        def neg_shape_L(z):
+            return -(np.exp(-z**2 / 2.0) * (1.0 + erf(alpha_L * z / np.sqrt(2.0))))
+        z_star_L = minimize_scalar(neg_shape_L, bounds=(-8.0, 8.0), method="bounded").x
+    S0_L = np.exp(-z_star_L**2 / 2.0) * (1.0 + erf(alpha_L * z_star_L / np.sqrt(2.0)))
+
+    z_L = (Omega - epsilon_L) / s_L
+    S_hat_L = np.exp(-z_L**2 / 2.0) * (1.0 + erf(alpha_L * z_L / np.sqrt(2.0))) / S0_L
+
+    B = R * S_hat_R + L * S_hat_L
     B_safe = np.where(B > 0.0, B, 1.0)
-    V_omega = 2.0 * np.sqrt(np.clip(R * L * G_hat * S_hat, 0.0, None)) / B_safe
+    V_omega = 2.0 * np.sqrt(np.clip(R * L * S_hat_R * S_hat_L, 0.0, None)) / B_safe
 
     Theta = theta0 + theta1 * Omega + theta2 * Omega**2
     return B * (1.0 + V_omega * np.cos(Theta)) + offset
