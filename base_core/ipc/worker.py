@@ -108,20 +108,24 @@ class BaseWorker(ABC):
 
     def _on_start_cmd(self, msg: StartWorker) -> None:
         if msg.worker_id == self._worker_id:
+            log.info("Worker %r: START", self._worker_id)
             self._start()
             self._reply_ok(msg)
 
     def _on_pause_cmd(self, msg: PauseWorker) -> None:
         if msg.worker_id == self._worker_id:
+            log.info("Worker %r: PAUSE", self._worker_id)
             self._pause()
             self._reply_ok(msg)
 
     def _on_resume_cmd(self, msg: ResumeWorker) -> None:
         if msg.worker_id == self._worker_id:
+            log.info("Worker %r: RESUME", self._worker_id)
             self._resume()
             self._reply_ok(msg)
 
     def _on_stop_cmd(self, msg: StopWorker) -> None:
         if msg.worker_id == self._worker_id:
+            log.info("Worker %r: STOP", self._worker_id)
             self._stop()
             self._reply_ok(msg)

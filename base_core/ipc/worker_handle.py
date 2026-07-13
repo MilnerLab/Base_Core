@@ -118,17 +118,21 @@ class BaseWorkerHandle(Generic[TEvent]):
         self._request(StopWorker(worker_id=self._worker_id), self._on_stop_reply)
 
     def _on_start_reply(self, reply: OKReply) -> None:
+        log.info("Handle %r: started -> RUNNING (subscribing to subprocess events)", self._worker_id)
         self.subscribe()
         self._worker_state._set(WorkerStatus.RUNNING)
 
     def _on_pause_reply(self, reply: OKReply) -> None:
+        log.info("Handle %r: paused -> PAUSED", self._worker_id)
         self._worker_state._set(WorkerStatus.PAUSED)
 
     def _on_resume_reply(self, reply: OKReply) -> None:
+        log.info("Handle %r: resumed -> RUNNING (re-subscribing to subprocess events)", self._worker_id)
         self.subscribe()
         self._worker_state._set(WorkerStatus.RUNNING)
 
     def _on_stop_reply(self, reply: OKReply) -> None:
+        log.info("Handle %r: stopped -> NEW", self._worker_id)
         self._worker_state._set(WorkerStatus.NEW)
 
     # --- helpers for concrete subclasses --------------------------------

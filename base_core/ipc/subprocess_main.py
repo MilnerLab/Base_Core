@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import sys
 import threading
@@ -68,6 +69,15 @@ class BaseSubprocessMain(ABC):
 
     def run(self) -> None:
         """Install signal handlers, subscribe AttachBuffer, call setup(), run read loop."""
+        # Subprocesses are separate interpreters with no logging config of their own,
+        # so without this every log.info/debug inside the subprocess is dropped and the
+        # terminal only ever shows WARNING+. Enable console logging first thing so the
+        # whole subprocess pipeline is visible (records interleave into the parent's
+        # terminal via inherited stdout/stderr; %(process)d distinguishes processes).
+        from base_core.framework.log import enable_console_logging
+        enable_console_logging(logging.INFO)
+        log.info("Subprocess %s starting (pid=%d)", type(self).__name__, os.getpid())
+
         stop_event = threading.Event()
 
         def _handle_signal(signum, frame):
