@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from math import factorial, pi
+from math import factorial, pi, sqrt
 from typing import Mapping, Sequence
 
 from base_core.quantities import constants
@@ -20,6 +20,11 @@ def gaussian(x: Sequence[float], A, x0, sigma, offset):
     xs = np.array(x, dtype=float)
     
     return A * np.exp(-((xs - x0) ** 2) / (2 * sigma ** 2)) + offset
+
+def erfc(x: Sequence[float], A, x0, sigma, offset):
+    xs = np.array(x, dtype=float)
+    
+    return 0.5 * A * erf((xs-x0)/(sqrt(2)*sigma)) + offset
 
 def spectrum_fit(lam, A, theta0, theta1, theta2, V, offset,
                  lambda0, delta_lambda_fwhm):
