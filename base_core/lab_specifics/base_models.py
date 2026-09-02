@@ -96,8 +96,9 @@ class RawScanData:
             
 @dataclass(frozen=True)
 class C2TScanData(ScanDataBase):
-    config: IonDataAnalysisConfig
+    config: IonDataAnalysisConfig | None = None
     ions_per_frame: list[float] | None = None
+    file_path: Path | None = None
     
     @classmethod
     def from_raw(
