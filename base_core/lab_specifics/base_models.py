@@ -33,9 +33,9 @@ class ScanDataBase:
                     w.writerow([d, m.value, m.error])
             print("Data saved to:",path)
             
-    def cut(self, start: int = 0, end: int = 0) -> None:
+    def cut(self, start: int = 0, end: int = 0):
         n = len(self.delays)
-        if len(self.measured_values) != n or start < 0 or end < 0 or abs(start - end) < 2:
+        if len(self.measured_values) != n or start < 0 or end < 0:
             raise ValueError("Invalid cut range.")
 
         if end:
@@ -44,7 +44,8 @@ class ScanDataBase:
         if start:
             del self.delays[:start]         #exclusive
             del self.measured_values[:start]
-
+            
+        return self
 @dataclass
 class IonData:
     id: int
@@ -98,6 +99,7 @@ class RawScanData:
 class C2TScanData(ScanDataBase):
     config: IonDataAnalysisConfig
     ions_per_frame: list[float] | None = None
+    
     
     @classmethod
     def from_raw(
