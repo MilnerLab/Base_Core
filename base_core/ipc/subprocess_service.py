@@ -9,12 +9,18 @@ from multiprocessing.connection import Connection as _MpConnection
 from typing import TYPE_CHECKING
 
 from base_core.framework.events.event_bus import EventBus
-from base_core.framework.shm.writer_worker_handle import WriterWorkerHandle
 from base_core.ipc.service_connector import ServicePipelineConnector
 
+# Deferred on purpose, all of it. base_core.framework.shm reaches back into this package
+# for the codec, so importing any of it from here at module level makes the two packages
+# a cycle that only resolves when base_core.ipc happens to be entered first -- importing
+# base_core.framework.shm.buffer as the very first thing then fails with a half-built
+# module. WriterWorkerHandle is needed at runtime for one isinstance check, which imports
+# it locally.
 if TYPE_CHECKING:
     from base_core.framework.shm.buffer import SharedMemoryBuffer
     from base_core.framework.shm.spec import MemorySpec
+    from base_core.framework.shm.writer_worker_handle import WriterWorkerHandle
     from base_core.ipc.worker_handle import BaseWorkerHandle
 
 log = logging.getLogger(__name__)
@@ -143,6 +149,8 @@ class SubprocessService(ABC):
                         "AttachBuffer failed for %r: %s", name, r.error
                     ),
                 )
+
+        from base_core.framework.shm.writer_worker_handle import WriterWorkerHandle
 
         for handle in self._worker_handles:
             if isinstance(handle, WriterWorkerHandle):
