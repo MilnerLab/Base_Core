@@ -1,9 +1,27 @@
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
+
+
+def default_log_file(app_name: str) -> Path:
+    """Where an application's rotating log should live, per platform.
+
+    Outside the repository on purpose. A log written next to the source is lost on
+    every clone and checkout, and this file is the only record of what a device
+    subprocess did before it died.
+    """
+    if sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Logs"
+    else:
+        base = Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local" / "state"))
+    return base / app_name / f"{app_name}.log"
 
 
 def setup_logging(

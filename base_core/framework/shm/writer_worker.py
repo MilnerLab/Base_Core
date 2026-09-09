@@ -85,9 +85,13 @@ class WriterWorker(ProducingThreadedWorker, Generic[TBuffer]):
         self._unsubs.append(self._bus.subscribe(SlotGrant, self._on_slot_grant))
 
     def _on_slot_grant(self, msg: SlotGrant) -> None:
-        if msg.buffer_class_name == self._buffer_cls.__name__:
-            with self._granted_lock:
-                self._granted.append(msg.slot)
+        if msg.buffer_class_name != self._buffer_cls.__name__:
+            log.debug("%s: ignoring a grant for %s", self._worker_id, msg.buffer_class_name)
+            return
+        with self._granted_lock:
+            self._granted.append(msg.slot)
+            depth = len(self._granted)
+        log.debug("%s: granted slot %s (%d queued)", self._worker_id, msg.slot, depth)
 
     def _get_slot(self) -> int | None:
         with self._granted_lock:
@@ -99,6 +103,7 @@ class WriterWorker(ProducingThreadedWorker, Generic[TBuffer]):
         return self._get_buffer_fn()
 
     def _notify_written(self, slot: int, item_id: int, timestamp_ns: int) -> None:
+        log.debug("%s: wrote item %d into slot %d", self._worker_id, item_id, slot)
         self._notify(ItemAvailable(
             buffer_class_name=self._buffer_cls.__name__,
             slot=slot,

@@ -5,6 +5,7 @@ import json
 import logging
 import types
 import typing
+from enum import Enum
 from typing import Any, get_args, get_origin, get_type_hints
 
 from base_core.framework.serialization.serde import PrimitiveSerde
@@ -75,6 +76,13 @@ def _reconstruct(value: Any, t: Any) -> Any:
     # list[X]
     if origin is list and args:
         return [_reconstruct(item, args[0]) for item in value]
+
+    # Enum — rebuild the member from its value. Without this a str-mixin enum decodes
+    # to a bare str: it still compares equal, so the bug hides, but `is` and `match`
+    # against a member both fail. Must come before the dataclass branch, since an enum
+    # is a plain class here.
+    if isinstance(t, type) and issubclass(t, Enum):
+        return t(value)
 
     # PrimitiveSerde takes priority over generic is_dataclass check
     if isinstance(t, type) and issubclass(t, PrimitiveSerde):

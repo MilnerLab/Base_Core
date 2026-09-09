@@ -6,9 +6,16 @@ from enum import Enum
 from typing import Callable, Generic, TypeVar
 
 from base_core.framework.events.event_bus import EventBus
+from base_core.ipc.connection_mode import ConnectionMode
 from base_core.ipc.message import ErrorReply, Message, OKReply, Reply, Request
 from base_core.ipc.service_connector import ServicePipelineConnector
-from base_core.ipc.worker_messages import PauseWorker, ResumeWorker, StartWorker, StopWorker
+from base_core.ipc.worker_messages import (
+    PauseWorker,
+    ResumeWorker,
+    StartWorker,
+    StopWorker,
+    WorkerStartedReply,
+)
 
 log = logging.getLogger(__name__)
 
@@ -93,10 +100,37 @@ class BaseWorkerHandle(Generic[TEvent]):
         self._pending_lock = threading.Lock()
         self._worker_state: WorkerState[TEvent] = WorkerState(bus, state_event)
         self._pre_busy_status: WorkerStatus = WorkerStatus.NEW
+        # What the worker reported connecting to. None until the first start reply
+        # lands, and back to None on stop — a stopped device is connected to nothing.
+        # None rather than a fourth enum member, because "not started" is meaningless
+        # inside StartWorker, where the same enum is the request.
+        self._connection_mode: ConnectionMode | None = None
+        self._connection_reason: str = ""
+        # What the last start() asked for, seeded with this handle's default so it is
+        # meaningful before the first start. The reported mode is judged against it.
+        self._requested_mode: ConnectionMode = self._default_start_mode()
+
+    @property
+    def worker_id(self) -> str:
+        return self._worker_id
 
     @property
     def state(self) -> WorkerStatus:
         return self._worker_state.value
+
+    @property
+    def connection_mode(self) -> ConnectionMode | None:
+        """Hardware or mock, as reported by the worker. None until started."""
+        return self._connection_mode
+
+    @property
+    def connection_reason(self) -> str:
+        """Why the device demoted, empty otherwise.
+
+        Kept on the handle, not only in the change event, so a panel opened from the
+        Devices menu after the fact can still say why rather than only that.
+        """
+        return self._connection_reason
 
     @property
     def busy(self) -> bool:
@@ -104,8 +138,24 @@ class BaseWorkerHandle(Generic[TEvent]):
 
     # --- lifecycle commands (Request[OKReply]) --------------------------
 
-    def start(self) -> None:
-        self._request(StartWorker(worker_id=self._worker_id), self._on_start_reply)
+    def start(self, mode: ConnectionMode | None = None) -> None:
+        """Start the worker. ``mode`` overrides what this handle would ask for."""
+        # Remembered, not just sent: the reply is judged against what was asked for, and
+        # a caller-supplied mode that is not recorded makes a deliberate mock look
+        # exactly like a device that failed.
+        self._requested_mode = mode if mode is not None else self._default_start_mode()
+        self._request(
+            StartWorker(worker_id=self._worker_id, mode=self._requested_mode),
+            self._on_start_reply,
+        )
+
+    def _requested_start_mode(self) -> ConnectionMode:
+        """What the last start() actually asked for."""
+        return self._requested_mode
+
+    def _default_start_mode(self) -> ConnectionMode:
+        """What to ask for when the caller does not say. Devices override via the mixin."""
+        return ConnectionMode.NONE
 
     def pause(self) -> None:
         self.unsubscribe()
@@ -118,8 +168,19 @@ class BaseWorkerHandle(Generic[TEvent]):
         self._request(StopWorker(worker_id=self._worker_id), self._on_stop_reply)
 
     def _on_start_reply(self, reply: OKReply) -> None:
+        # getattr, not attribute access: a worker that predates WorkerStartedReply, or
+        # any hand-built OKReply in a test, still starts cleanly and reports NONE.
+        self._on_mode_reported(
+            ConnectionMode(getattr(reply, "mode", ConnectionMode.NONE)),
+            getattr(reply, "reason", ""),
+        )
         self.subscribe()
         self._worker_state._set(WorkerStatus.RUNNING)
+
+    def _on_mode_reported(self, mode: ConnectionMode, reason: str) -> None:
+        """Record what the worker connected to. The device mixin also announces it."""
+        self._connection_mode = mode
+        self._connection_reason = reason
 
     def _on_pause_reply(self, reply: OKReply) -> None:
         self._worker_state._set(WorkerStatus.PAUSED)
@@ -129,6 +190,8 @@ class BaseWorkerHandle(Generic[TEvent]):
         self._worker_state._set(WorkerStatus.RUNNING)
 
     def _on_stop_reply(self, reply: OKReply) -> None:
+        self._connection_mode = None
+        self._connection_reason = ""
         self._worker_state._set(WorkerStatus.NEW)
 
     # --- helpers for concrete subclasses --------------------------------
@@ -149,6 +212,13 @@ class BaseWorkerHandle(Generic[TEvent]):
         Non-lifecycle handlers leave status as BUSY, so the restore fires after them.
         Either way exactly one state-change event is published per transition.
         """
+        if self._connector is None:
+            # A panel can be built and clicked before its service is up, or after it
+            # has been torn down. That should cost the operator a log line, not a
+            # traceback out of a Qt slot that takes the panel down with it.
+            log.warning("%s[%s]: dropping %s — not connected to the subprocess",
+                        type(self).__name__, self._worker_id, type(msg).__name__)
+            return
         with self._pending_lock:
             if self._pending_count == 0:
                 self._pre_busy_status = self._worker_state.value

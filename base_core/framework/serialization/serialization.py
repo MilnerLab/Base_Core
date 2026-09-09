@@ -1,5 +1,6 @@
 
 from dataclasses import MISSING, fields, is_dataclass
+from enum import Enum
 from typing import Any, Union, get_args, get_origin
 
 import numpy as np
@@ -11,6 +12,12 @@ def to_primitive(obj: Any) -> Primitive:
 
     if isinstance(obj, PrimitiveSerde):
         return obj.to_primitive()
+
+    # Before the str/int/float/bool branch, not after: a str- or float-mixin member is
+    # an instance of str/float and would otherwise be returned as the member itself.
+    # json renders that correctly by luck, but to_primitive is used outside json too.
+    if isinstance(obj, Enum):
+        return to_primitive(obj.value)
 
     if obj is None or isinstance(obj, (str, int, float, bool)):
         return obj
@@ -59,6 +66,11 @@ def _convert_field(t: Any, v: Any) -> Any:
         if len(args) == 2 and args[1] is Ellipsis:
             return tuple(_convert_field(args[0], x) for x in v)
         return tuple(_convert_field(ti, xi) for ti, xi in zip(args, v))
+
+    # Enum — mirrors the branch in codec._reconstruct. These two functions are parallel
+    # implementations of the same idea; leaving one enum-blind is how this bug returns.
+    if isinstance(t, type) and issubclass(t, Enum):
+        return t(v)
 
     # Parameterized PrimitiveSerde e.g. Range[int] — origin is Range
     if origin is not None and isinstance(origin, type) and issubclass(origin, PrimitiveSerde):

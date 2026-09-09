@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import sys
 import threading
@@ -68,6 +69,7 @@ class BaseSubprocessMain(ABC):
 
     def run(self) -> None:
         """Install signal handlers, subscribe AttachBuffer, call setup(), run read loop."""
+        self._setup_logging()
         stop_event = threading.Event()
 
         def _handle_signal(signum, frame):
@@ -89,6 +91,32 @@ class BaseSubprocessMain(ABC):
 
         self.connector.run(stop_event)
         self._teardown()
+
+    def _setup_logging(self) -> None:
+        """Configure the root logger for this subprocess.
+
+        Nothing configured one before, so every ``log.debug``/``log.info`` in a device
+        worker went nowhere and only WARNING and above reached the terminal, through
+        logging's last-resort handler. That is a bad trade for hardware code: the
+        subprocess is where the drivers actually run, and it was the one place with no
+        record of what they did.
+
+        The level comes from ``SUBPROCESS_LOG_LEVEL`` so a stuck device can be turned
+        up to DEBUG without a source edit.
+        """
+        level_name = os.environ.get("SUBPROCESS_LOG_LEVEL", "INFO").upper()
+        level = getattr(logging, level_name, logging.INFO)
+        root = logging.getLogger()
+        if root.handlers:
+            root.setLevel(level)
+            return
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(
+            fmt=f"%(asctime)s | %(levelname)s | {type(self).__name__} | %(name)s | %(message)s",
+            datefmt="%H:%M:%S",
+        ))
+        root.addHandler(handler)
+        root.setLevel(level)
 
     def _teardown(self) -> None:
         """Called after the read loop exits (SIGTERM or pipe close).
