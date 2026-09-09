@@ -2,7 +2,7 @@ from matplotlib import cm, collections
 from matplotlib.axes import Axes
 import numpy as np
 
-from base_core.math.models import AngularCovariance
+from base_core.math.special_models import AngularCovariance
 
 
 def plot_covariance(
