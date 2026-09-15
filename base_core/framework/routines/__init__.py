@@ -1,4 +1,4 @@
 from base_core.framework.routines.routine_base import BaseRoutine, routine_thread
-from base_core.framework.routines.step import Step
+from base_core.framework.routines.run_control import RunControl, ScanAborted
 
-__all__ = ["BaseRoutine", "Step", "routine_thread"]
+__all__ = ["BaseRoutine", "RunControl", "ScanAborted", "routine_thread"]

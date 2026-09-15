@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import logging
 from abc import ABC
+from contextlib import contextmanager
 from functools import wraps
-from typing import Callable, TYPE_CHECKING
+from typing import Any, Callable, Iterator, TYPE_CHECKING
 
 from base_core.framework.concurrency.task_runner import TaskRunner
-from base_core.framework.routines.step import Step
+from base_core.framework.routines.run_control import RunControl, ScanAborted
 
 if TYPE_CHECKING:
     from base_core.framework.events.event_bus import EventBus
@@ -31,24 +32,29 @@ class BaseRoutine(ABC):
     Main-process routine. Factory-registered in DI; each container.get() produces a
     fresh instance that immediately starts its own serial task queue + thread.
 
-    Step sequencing
-    ---------------
-    Register steps via add_step(). Each Step carries its own slot number; the routine
-    sorts by slot so execution order is defined by the step, not by call order.
+    What a routine gets from here
+    -----------------------------
+    - **A thread.** One serial TaskRunner. Dispatch onto it with @routine_thread, or
+      _dispatch() directly. A whole run is normally ONE dispatched method.
+    - **Run control.** pause() / resume() / abort() / step(), callable from any thread,
+      plus checkpoint() to yield to them from the routine thread. See RunControl — the
+      threading discipline there is load-bearing and explained in full.
+    - **A run lifecycle.** run_lifecycle() publishes a failure event on any raise,
+      always runs your cleanup, and always marks the run stopped.
 
-        add_step(GatherSpectraStep(slot=0, handle=h))
-        add_step(FitPhaseStep(slot=1, config=cfg))
-
-    - advance_step()  — stop current step, start the next
-    - revert_step()   — stop current step, restart the previous
-    - reset_step()    — reset current step in place (no transition)
-    - current_step    — the active Step object, or None if none registered
+    Deliberately NOT a state machine. A routine expresses its sequence in ordinary
+    Python — for, try/finally, early return — because loops, nesting and early exit are
+    exactly what a slot-indexed step list cannot express and what a measurement routine
+    is made of. What Python does not give you is the threading discipline and the
+    lifecycle guarantee above, so that is what lives here.
 
     Subclass pattern
     ----------------
-    - __init__: accept bus + handles/config from DI; call super().__init__(bus), then add_step()
+    - __init__: accept bus + handles/config from DI; call super().__init__(bus)
     - _setup(): subscribe to events; store each unsub in self._unsubs
     - handlers: decorate with @routine_thread so they run on this routine's thread
+    - the run itself: control.begin() on the caller's thread, then one @routine_thread
+      method wrapping its body in run_lifecycle()
 
     DI registration example
     -----------------------
@@ -60,75 +66,109 @@ class BaseRoutine(ABC):
     Usage
     -----
         routine = c.get(MyRoutine)   # creates instance + starts thread
-        ...
-        routine.stop()               # unsubscribes + shuts down thread
+        routine.pause() / routine.resume() / routine.abort()
+        routine.dispose()            # unsubscribes + shuts down thread
     """
 
     def __init__(self, bus: EventBus) -> None:
         self._bus = bus
         self._unsubs: list[Callable[[], None]] = []
         self._runner = TaskRunner(name=type(self).__name__.lower())
-        self._step_list: list[Step] = []   # sorted by step.slot
-        self._step_index: int = 0
+        self._control = RunControl()
         self._setup()
 
     # ------------------------------------------------------------------
-    # Step registration
-    # ------------------------------------------------------------------
-
-    def add_step(self, step: Step) -> None:
-        """Register a step. Steps are sorted by slot number, not insertion order."""
-        self._step_list.append(step)
-        self._step_list.sort(key=lambda s: s.slot)
-
-    # ------------------------------------------------------------------
-    # Step state (read from any thread; mutations dispatched to runner)
+    # Run control — callable from any thread, never dispatched
     # ------------------------------------------------------------------
 
     @property
-    def current_step(self) -> Step | None:
-        if not self._step_list:
-            return None
-        return self._step_list[self._step_index]
+    def control(self) -> RunControl:
+        return self._control
 
     @property
-    def step_index(self) -> int:
-        return self._step_index
+    def is_running(self) -> bool:
+        return self._control.is_running
+
+    @property
+    def is_paused(self) -> bool:
+        return self._control.is_paused
+
+    @property
+    def is_step_mode(self) -> bool:
+        return self._control.is_step_mode
+
+    def pause(self) -> None:
+        """Hold the run at its next checkpoint. Devices keep position."""
+        self._control.pause()
+
+    def resume(self) -> None:
+        """Continue from where a pause parked."""
+        self._control.resume()
+
+    def abort(self) -> None:
+        """Stop the run at its next checkpoint, keeping whatever is already complete."""
+        self._control.abort()
+
+    def set_step_mode(self, enabled: bool) -> None:
+        """Turn operator-advanced stepping on or off."""
+        self._control.set_step_mode(enabled)
+
+    def step(self, n: int = 1) -> None:
+        """Permit ``n`` more advances while in step mode."""
+        self._control.step(n)
 
     # ------------------------------------------------------------------
-    # Step transitions
+    # Routine-thread helpers
     # ------------------------------------------------------------------
 
-    def advance_step(self) -> None:
-        """Stop the current step and start the next. No-op at the last step."""
-        self._dispatch(self._do_advance)
+    def checkpoint(self, *, on_hold: Callable[[], None] | None = None) -> None:
+        """Yield to the operator: block while paused, raise ScanAborted if stopping.
 
-    def revert_step(self) -> None:
-        """Stop the current step and restart the previous. No-op at the first step."""
-        self._dispatch(self._do_revert)
+        Call at every point the run can safely be interrupted, and nowhere else.
+        ``on_hold`` fires once if this call actually parks — for suspending anything that
+        would otherwise keep accumulating against a rig that is now standing still.
+        """
+        self._control.checkpoint(on_hold=on_hold)
 
-    def reset_step(self) -> None:
-        """Reset the current step in place."""
-        self._dispatch(self._do_reset)
+    @contextmanager
+    def run_lifecycle(
+        self,
+        failed: Callable[[BaseException], Any] | None = None,
+        *,
+        cleanup: Callable[[], None] | None = None,
+    ) -> Iterator[None]:
+        """Own the end of a run, however it ends.
 
-    def _do_advance(self) -> None:
-        if not self._step_list or self._step_index >= len(self._step_list) - 1:
-            return
-        self._step_list[self._step_index].stop()
-        self._step_index += 1
-        self._step_list[self._step_index].start()
+        On any exception: log it and publish ``failed(exc)``. On :class:`ScanAborted`
+        that escapes this far: log it and finish quietly — an abort is the operator
+        getting what they asked for, not a failure. Always: run ``cleanup``, then mark
+        the run stopped.
 
-    def _do_revert(self) -> None:
-        if not self._step_list or self._step_index <= 0:
-            return
-        self._step_list[self._step_index].stop()
-        self._step_index -= 1
-        self._step_list[self._step_index].start()
+        The guarantee is the point. A run that raises somewhere its author did not
+        anticipate must still announce *something*, or every waiter — a headless harness,
+        a progress panel, an operator watching a status line — hangs forever on a run
+        that is already dead, while the subprocesses it started stay up holding the
+        hardware.
 
-    def _do_reset(self) -> None:
-        step = self.current_step
-        if step is not None:
-            step.reset()
+        ``failed`` is optional only because a routine nobody waits on has no event worth
+        publishing, and inventing one so this parameter can be filled would be worse than
+        leaving it out. If anything outside the routine can observe the run, pass it.
+        """
+        try:
+            yield
+        except ScanAborted:
+            log.info("%s: run aborted", type(self).__name__)
+        except Exception as exc:  # noqa: BLE001 — deliberately everything
+            log.exception("%s: run failed", type(self).__name__)
+            if failed is not None:
+                self._bus.publish(failed(exc))
+        finally:
+            if cleanup is not None:
+                try:
+                    cleanup()
+                except Exception:
+                    log.exception("%s: cleanup failed", type(self).__name__)
+            self._control.end()
 
     # ------------------------------------------------------------------
     # Infrastructure
@@ -143,8 +183,14 @@ class BaseRoutine(ABC):
             on_error=lambda _: log.exception("Unhandled error in %s", type(self).__name__),
         )
 
-    def stop(self) -> None:
-        """Unsubscribe all events and shut down the runner thread."""
+    def dispose(self) -> None:
+        """Retire this routine: unsubscribe all events and shut the runner thread down.
+
+        This is *disposal*, not a way to stop a run — ``TaskRunner``'s stop sentinel
+        queues behind whatever is already running, so calling this mid-run waits for the
+        run to finish rather than ending it. To stop a run, call :meth:`abort`, which the
+        routine thread notices at its next checkpoint; dispose afterwards.
+        """
         for unsub in reversed(self._unsubs):
             unsub()
         self._runner.shutdown()

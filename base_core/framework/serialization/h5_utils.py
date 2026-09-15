@@ -1,11 +1,14 @@
 # storage_h5/io_utils.py
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, TypeVar
 
 import h5py
 import numpy as np
+
+T = TypeVar("T")
 
 def now_utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -25,6 +28,25 @@ def write_utf8(g: h5py.Group, name: str, text: str) -> None:
 def read_utf8(g: h5py.Group, name: str) -> str:
     v = g[name][()]
     return v.decode("utf-8") if isinstance(v, (bytes, bytearray)) else str(v)
+
+def write_primitive(g: h5py.Group, name: str, obj: Any) -> None:
+    """Store ``obj`` as canonical JSON of its primitive form, tagged with its class.
+
+    Anything structured -- configs, metadata snapshots -- goes to disk this way rather than
+    as hand-flattened attrs, so any reader can rebuild it with :func:`read_primitive` or,
+    without the class at hand, just ``json.loads`` the string.
+    """
+    from base_core.framework.serialization.serialization import to_primitive
+
+    write_utf8(g, name, json.dumps(to_primitive(obj), sort_keys=True, ensure_ascii=False))
+    cls = type(obj)
+    g[name].attrs["type"] = f"{cls.__module__}.{cls.__qualname__}"
+
+def read_primitive(g: h5py.Group, name: str, cls: type[T]) -> T:
+    """Rebuild an object written by :func:`write_primitive`."""
+    from base_core.framework.serialization.serialization import from_primitive
+
+    return from_primitive(cls, json.loads(read_utf8(g, name)))
 
 def write_array(
     g: h5py.Group,
