@@ -40,8 +40,7 @@ class DeviceHandleMixin:
 
         class PicomotorHandle(DeviceHandleMixin, BaseWorkerHandle): ...
 
-    Silence is the failure mode this exists to prevent. A rig quietly running on a
-    fake looks exactly like a rig that works, right up until someone files the data.
+    Silence is the failure mode this exists to prevent. 
     """
 
     #: What a device handle asks for unless told otherwise. Subclasses may override.
