@@ -138,8 +138,8 @@ class InverseLength(float, PrimitiveSerde):
         return cls(float(v))  # interpret as 1/m
 
     def to_frequency(self) -> Frequency:
-        """ν = c * k  (Hz if k is 1/m)."""
-        return Frequency(SPEED_OF_LIGHT * float(self))
+        """omega = c * k  angular frequency (Hz because k is forced to be 1/m)."""
+        return Frequency(SPEED_OF_LIGHT * self.value())
 
 
 class Mass(float, PrimitiveSerde):

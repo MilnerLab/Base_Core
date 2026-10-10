@@ -13,7 +13,7 @@ from base_core.quantities.constants import SPEED_OF_LIGHT
 
 
 
-def gaussian(x: Sequence[float], A, x0, sigma, offset):
+def gaussian(x: Sequence[float], A=1, x0=0, sigma=1, offset=0):
     """
     1D Gaussian with constant offset.
     """
