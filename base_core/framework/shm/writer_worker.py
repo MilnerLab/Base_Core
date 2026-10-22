@@ -99,6 +99,15 @@ class WriterWorker(ProducingThreadedWorker, Generic[TBuffer]):
                 return self._granted.popleft()
         return None
 
+    def _unget_slot(self, slot: int) -> None:
+        """Hand back a slot taken with _get_slot() but never written, at the front.
+
+        For a producer that is stopped while waiting for data: the grant is the only one
+        the main process will send for that slot, so dropping it would stall the buffer.
+        """
+        with self._granted_lock:
+            self._granted.appendleft(slot)
+
     def _get_buffer(self) -> TBuffer:
         return self._get_buffer_fn()
 
