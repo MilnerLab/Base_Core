@@ -8,9 +8,10 @@ from numpy import pi
 
 from base_core.math.enums import CartesianAxis
 from base_core.quantities.enums import Prefix
+from base_core.quantities.constants import HBAR_J_S
 
 from base_core.quantities.models import Frequency, InverseLength, Length, Temperature
-from base_core.quantities.specific_models import AtomicMass, Intensity, PolarizabilityVolume
+from base_core.quantities.specific_models import AtomicMass, Intensity, PolarizabilityVolume, Energy
 
 TensorRow: TypeAlias = tuple[
     PolarizabilityVolume,
@@ -51,7 +52,7 @@ class Polarizability:
     reference: str = ""
     notes: str = ""
 
-# ----------------- helper methods ----------------------
+    
 
 # ----------------- Base molecule class -----------------
 
@@ -73,7 +74,7 @@ class Molecule:
     tags: tuple[str, ...] = ()
     notes: str = ""
     meta: Mapping[str, Any] = field(default_factory=dict)
-
+    
     def __post_init__(self) -> None:
         if not self.key.strip():
             raise ValueError("Molecule.key must be non-empty")
@@ -85,7 +86,34 @@ class Molecule:
         if not isinstance(self.meta, MappingProxyType):
             object.__setattr__(self, "meta", MappingProxyType(dict(self.meta)))
             
+            
+#--------------- Helpers ------------------------------
+def inertia(B: Frequency = None):
+    return HBAR_J_S**2 / (2 * B)
 
+def rot_energy(mol: Molecule = None, j: int = 0, *, droplet: bool = False) -> Energy:
+    if droplet: 
+        return Energy(mol.droplet.B.value() * j * (j+1) - mol.droplet.D.value() * j**2 * (j+1)**2)
+    else:
+        if mol.gasphase.D is not None:
+            return Energy(mol.gasphase.B.value() * j * (j+1) - mol.gasphase.D.value() * j**2 * (j+1)**2)
+        else:
+            return Energy(mol.gasphase.B.value() * j * (j+1))
+
+def twophoton(mol: Molecule = None, j_initial: int = 0, droplet: bool = False) -> Frequency:
+    """ The two-photon frequency of the delta J = 2 transistion of a molecule.
+
+    Args:
+        mol (Molecule, optional): the molecule class is needed for the B and sometimes also D
+        j_initial (int, optional): _description_. Defaults to 0.
+
+    Returns:
+        Frequency: default prefix set to GIGA
+    """
+    if droplet: 
+        return Frequency(rot_energy(mol,j_initial+2,droplet=True) - rot_energy(mol,j_initial,droplet=True))
+    else:
+        return Frequency(rot_energy(mol,j_initial+2,droplet=False) - rot_energy(mol,j_initial,droplet=False))
 
 # ----------------- Fixed-value holders -----------------
 
@@ -100,7 +128,7 @@ class CS2(Molecule):
             rotational_radius=Length(1.553, Prefix.ANGSTROM), # sulfur
 
             gasphase=RotationalBD(
-                B=InverseLength(0.110, Prefix.CENTI).to_frequency(),
+                B=InverseLength(0.109, Prefix.CENTI).to_frequency(),
                 D=InverseLength(12, Prefix.NANO).to_frequency(),
                 reference="MacPhail-Bartley thesis (example)"),
             droplet=RotationalBD(
@@ -127,7 +155,7 @@ class OCS(Molecule):
             
             gasphase=RotationalBD(
                 B = Frequency(6,Prefix.GIGA),
-                D=InverseLength(0.4*10**-7,Prefix.CENTI)
+                D=InverseLength(0.4*10**-7,Prefix.CENTI).to_frequency()
                 ),
             droplet=RotationalBD(
                 B = Frequency(2.18,Prefix.GIGA),
@@ -195,3 +223,5 @@ class DIB(Molecule):
 
             tags=("asymmetric top", "droplets"),
         )
+        
+#----------------Helpers-----------------------------
