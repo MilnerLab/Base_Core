@@ -43,9 +43,10 @@ def plot_covariance(
     ax.set_ylabel("Emission Angle (Degrees)" if to_degree else "Emission Angle (Radians)")
 
     if to_degree:
-        ax.set_xlim(-90, 270)
-        ax.set_ylim(-90, 270)
-        ticks = [-90, 0, 90, 180, 270]
+        lo, hi = -shift_deg, -shift_deg + 360.0
+        ax.set_xlim(lo, hi)
+        ax.set_ylim(lo, hi)
+        ticks = [lo, lo + 90, lo + 180, lo + 270, hi]
         ax.set_xticks(ticks)
         ax.set_yticks(ticks)
 
