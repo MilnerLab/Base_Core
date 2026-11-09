@@ -8,6 +8,10 @@ class PlotColor(str, Enum):
     GREEN  = "g"
     PURPLE = "purple"
     GRAY   = "tab:gray"
+    ORANGE = "tab:orange"
+    BROWN  = "tab:brown"
+    CYAN   = "c"
+    NAVY   = "navy"
     BLACK = "k"
     
 class PlotColorMap(str, Enum):
