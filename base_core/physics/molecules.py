@@ -107,7 +107,6 @@ class CS2(Molecule): #Should incorporate a symmetry flag because it has ONLY EVE
 
             gasphase=RotationalBD(
                 B=InverseLength(0.109, Prefix.CENTI).to_frequency(),
-                B=InverseLength(0.109, Prefix.CENTI).to_frequency(),
                 D=InverseLength(12, Prefix.NANO).to_frequency(),
                 reference="MacPhail-Bartley thesis (example)"),
             droplet=RotationalBD(
@@ -134,7 +133,6 @@ class OCS(Molecule):
             
             gasphase=RotationalBD(
                 B = Frequency(6,Prefix.GIGA),
-                D=InverseLength(0.4*10**-7,Prefix.CENTI).to_frequency()
                 D=InverseLength(0.4*10**-7,Prefix.CENTI).to_frequency()
                 ),
             droplet=RotationalBD(
