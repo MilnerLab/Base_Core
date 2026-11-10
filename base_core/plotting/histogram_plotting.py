@@ -14,7 +14,13 @@ def plot_histogram2d(ax: Axes, data: Histogram2D) -> collections.QuadMesh:
     ax.set_xlabel("x")
     ax.set_ylabel("y")
     norm = cm.colors.LogNorm()
-    return ax.pcolormesh(data.x_edges, data.y_edges, data.matrix.T, norm=norm, shading='auto', cmap=PlotColorMap.MAGMA,alpha=1.0) #transposed matrix bc hist2d transposes the output
+    # LogNorm masks zero/NaN bins as "bad"; without this they'd render in the cmap's
+    # default bad color (near-white for magma). Use the colormap's own bottom color
+    # instead, so empty bins blend into the low end of the colorbar.
+    cmap = cm.get_cmap(PlotColorMap.MAGMA).copy()
+    cmap.set_bad(cmap(0.0))
+    ax.set_facecolor(cmap(0.0))
+    return ax.pcolormesh(data.x_edges, data.y_edges, data.matrix.T, norm=norm, shading='auto', cmap=cmap,alpha=1.0) #transposed matrix bc hist2d transposes the output
     
 def plot_contour(ax: Axes, data: Histogram2D,*,min_count: int = 50) -> contour.QuadContourSet:
     # To align the contours correctly, we need the bin centers, not the edges

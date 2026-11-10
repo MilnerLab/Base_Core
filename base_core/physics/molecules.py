@@ -9,8 +9,10 @@ from numpy import pi
 from base_core.math.enums import CartesianAxis
 from base_core.quantities.enums import Prefix
 from base_core.quantities.constants import HBAR_J_S
+from base_core.quantities.constants import HBAR_J_S
 
 from base_core.quantities.models import Frequency, InverseLength, Length, Temperature
+from base_core.quantities.specific_models import AtomicMass, Intensity, PolarizabilityVolume, Energy
 from base_core.quantities.specific_models import AtomicMass, Intensity, PolarizabilityVolume, Energy
 
 TensorRow: TypeAlias = tuple[
@@ -53,6 +55,7 @@ class Polarizability:
     notes: str = ""
 
     
+    
 
 # ----------------- Base molecule class -----------------
 
@@ -74,6 +77,7 @@ class Molecule:
     tags: tuple[str, ...] = ()
     notes: str = ""
     meta: Mapping[str, Any] = field(default_factory=dict)
+    
     
     def __post_init__(self) -> None:
         if not self.key.strip():
@@ -103,6 +107,7 @@ class CS2(Molecule): #Should incorporate a symmetry flag because it has ONLY EVE
 
             gasphase=RotationalBD(
                 B=InverseLength(0.109, Prefix.CENTI).to_frequency(),
+                B=InverseLength(0.109, Prefix.CENTI).to_frequency(),
                 D=InverseLength(12, Prefix.NANO).to_frequency(),
                 reference="MacPhail-Bartley thesis (example)"),
             droplet=RotationalBD(
@@ -129,6 +134,7 @@ class OCS(Molecule):
             
             gasphase=RotationalBD(
                 B = Frequency(6,Prefix.GIGA),
+                D=InverseLength(0.4*10**-7,Prefix.CENTI).to_frequency()
                 D=InverseLength(0.4*10**-7,Prefix.CENTI).to_frequency()
                 ),
             droplet=RotationalBD(
