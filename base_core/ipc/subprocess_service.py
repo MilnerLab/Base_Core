@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import socket as _socket
 import subprocess
 import sys
@@ -106,6 +107,14 @@ class SubprocessService(ABC):
         if self.is_running:
             log.warning("%s.start() called while already running", type(self).__name__)
             return
+
+        # Checked up front so a bad path fails with a readable message instead of a bare
+        # WinError 2 from Popen. which() accepts both full paths and bare names on PATH.
+        if shutil.which(self._python_exe) is None:
+            raise FileNotFoundError(
+                f"{type(self).__name__}: Python interpreter not found: {self._python_exe} "
+                f"(needed to run {self._entry_module})"
+            )
 
         srv = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
         srv.bind(('127.0.0.1', 0))

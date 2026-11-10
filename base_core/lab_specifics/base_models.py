@@ -22,6 +22,7 @@ class ScanDataBase:
     delays: list[Time]
     measured_values: list[Measurement]
     run_id:int
+    ions_per_point: int
 
     def to_csv(self, path: str | Path) -> None:
         if path == None:
@@ -52,6 +53,7 @@ class IonData:
     ions_per_frame: float
     stage_position: Length
     points: MarkedPoints
+    
     
     def get_points_after_config(self, config: IonDataAnalysisConfig) -> MarkedPoints:
         pts = MarkedPoints(self.points.x.copy(), self.points.y.copy(), self.points.marker.copy())
@@ -100,7 +102,6 @@ class C2TScanData(ScanDataBase):
     config: IonDataAnalysisConfig
     ions_per_frame: list[float] | None = None
     
-    
     @classmethod
     def from_raw(
         cls,
@@ -111,10 +112,11 @@ class C2TScanData(ScanDataBase):
         c2t: list[Measurement] = []
         ions: list[float] = []
 
+        n = raw.ion_datas[0].points.__len__() 
         for d in raw.ion_datas:
             # --- copy raw points so we do NOT mutate RawScanData ---
             pts = d.get_points_after_config(config)
-
+            
             delays.append(calculate_time_delay(d.stage_position, config.delay_center))
             c2t.append(IonData.avg_c2t(pts))
             ions.append(d.ions_per_frame)
@@ -125,5 +127,6 @@ class C2TScanData(ScanDataBase):
             measured_values=c2t,
             config=config,
             run_id=raw.run_id,
-            ions_per_frame = ions)
+            ions_per_frame = ions,
+            ions_per_point = n)
         

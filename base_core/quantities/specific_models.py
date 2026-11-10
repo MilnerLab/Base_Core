@@ -176,3 +176,5 @@ class GDD(float, PrimitiveSerde):
     @classmethod
     def from_primitive(cls, v: Primitive) -> "GDD":
         return cls(float(v))  # interpret as s^2
+    
+    
