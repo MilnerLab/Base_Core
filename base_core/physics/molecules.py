@@ -87,37 +87,11 @@ class Molecule:
             object.__setattr__(self, "meta", MappingProxyType(dict(self.meta)))
             
             
-#--------------- Helpers ------------------------------
-def inertia(B: Frequency = None):
-    return HBAR_J_S**2 / (2 * B)
 
-def rot_energy(mol: Molecule = None, j: int = 0, *, droplet: bool = False) -> Energy:
-    if droplet: 
-        return Energy(mol.droplet.B.value() * j * (j+1) - mol.droplet.D.value() * j**2 * (j+1)**2)
-    else:
-        if mol.gasphase.D is not None:
-            return Energy(mol.gasphase.B.value() * j * (j+1) - mol.gasphase.D.value() * j**2 * (j+1)**2)
-        else:
-            return Energy(mol.gasphase.B.value() * j * (j+1))
-
-def twophoton(mol: Molecule = None, j_initial: int = 0, droplet: bool = False) -> Frequency:
-    """ The two-photon frequency of the delta J = 2 transistion of a molecule.
-
-    Args:
-        mol (Molecule, optional): the molecule class is needed for the B and sometimes also D
-        j_initial (int, optional): _description_. Defaults to 0.
-
-    Returns:
-        Frequency: default prefix set to GIGA
-    """
-    if droplet: 
-        return Frequency(rot_energy(mol,j_initial+2,droplet=True) - rot_energy(mol,j_initial,droplet=True))
-    else:
-        return Frequency(rot_energy(mol,j_initial+2,droplet=False) - rot_energy(mol,j_initial,droplet=False))
 
 # ----------------- Fixed-value holders -----------------
 
-class CS2(Molecule):
+class CS2(Molecule): #Should incorporate a symmetry flag because it has ONLY EVEN J 
     def __init__(self) -> None:
         super().__init__(
             key="cs2",
@@ -223,5 +197,3 @@ class DIB(Molecule):
 
             tags=("asymmetric top", "droplets"),
         )
-        
-#----------------Helpers-----------------------------
