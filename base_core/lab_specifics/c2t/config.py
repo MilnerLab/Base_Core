@@ -5,7 +5,7 @@ from base_core.math.models import Angle, Point, Range
 from base_core.quantities.models import Length
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class IonDataAnalysisConfig:
     delay_center: Length
     center: Point
