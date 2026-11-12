@@ -1,6 +1,6 @@
 
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import math
 from pathlib import Path
 
@@ -22,7 +22,7 @@ class ScanDataBase:
     delays: list[Time]
     measured_values: list[Measurement]
     run_id:int
-    ions_per_point: int
+    ions_per_point: int | None = None #SETTING A DEFAULT OF NONE TO PREVENT OLD SCRIPTS FROM FAILING.
 
     def to_csv(self, path: str | Path) -> None:
         if path == None:
@@ -99,7 +99,7 @@ class RawScanData:
             
 @dataclass(frozen=True)
 class C2TScanData(ScanDataBase):
-    config: IonDataAnalysisConfig
+    config: IonDataAnalysisConfig = field(kw_only=True) #CLAUDE CHANGE. NOT SURE WHAT THIS DOES.
     ions_per_frame: list[float] | None = None
     
     @classmethod
