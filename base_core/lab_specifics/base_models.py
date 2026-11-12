@@ -112,21 +112,23 @@ class C2TScanData(ScanDataBase):
         c2t: list[Measurement] = []
         ions: list[float] = []
 
-        n = raw.ion_datas[0].points.__len__() 
+        total_ions = 0
+        num_points = len(raw.ion_datas) 
+        
         for d in raw.ion_datas:
             # --- copy raw points so we do NOT mutate RawScanData ---
             pts = d.get_points_after_config(config)
-            
+            total_ions += pts.__len__()
             delays.append(calculate_time_delay(d.stage_position, config.delay_center))
             c2t.append(IonData.avg_c2t(pts))
             ions.append(d.ions_per_frame)
 
-
+        i_per_point = total_ions / num_points
         return cls(
             delays=delays,
             measured_values=c2t,
             config=config,
             run_id=raw.run_id,
             ions_per_frame = ions,
-            ions_per_point = n)
+            ions_per_point = i_per_point)
         
