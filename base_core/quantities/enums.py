@@ -3,6 +3,7 @@ from enum import Enum
 
 class Prefix(float, Enum):
     NONE = 1.0   
+    FEMTO = 1E-15
     PICO   = 1e-12
     ANGSTROM = 1e-10
     NANO   = 1e-9
