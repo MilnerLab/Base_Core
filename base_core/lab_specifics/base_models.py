@@ -45,8 +45,53 @@ class ScanDataBase:
         if start:
             del self.delays[:start]         #exclusive
             del self.measured_values[:start]
-            
+
         return self
+    #CUT_TIME WAS MADE BY CLAUDE AND NOT PROOFREAD
+    def cut_time(self, t_min: Time | None = None, t_max: Time | None = None):
+        """
+        Keep only points whose delay lies within [t_min, t_max] (inclusive).
+        None means no threshold on that side. Plain floats are interpreted as seconds.
+        """
+        if t_min is not None and t_max is not None and t_min > t_max:
+            raise ValueError("Invalid cut range: t_min > t_max.")
+
+        keep = [
+            (t_min is None or d >= t_min) and (t_max is None or d <= t_max)
+            for d in self.delays
+        ]
+        return self._keep_points(keep)
+    #CUT_C2T WAS MADE BY CLAUDE AND NOT PROOFREAD
+    def cut_c2t(self, c2t_min: float | None = None, c2t_max: float | None = None):
+        """
+        Keep only points whose measured value (<cos^2 theta>) lies within
+        [c2t_min, c2t_max] (inclusive). None means no threshold on that side.
+        """
+        if c2t_min is not None and c2t_max is not None and c2t_min > c2t_max:
+            raise ValueError("Invalid cut range: c2t_min > c2t_max.")
+
+        keep = [
+            (c2t_min is None or m.value >= c2t_min) and (c2t_max is None or m.value <= c2t_max)
+            for m in self.measured_values
+        ]
+        return self._keep_points(keep)
+
+    def _keep_points(self, keep: list[bool]):
+        """Remove (in place) every point whose mask entry is False, from all per-point lists."""
+        n = len(self.delays)
+        if len(self.measured_values) != n:
+            raise ValueError("delays and measured_values have different lengths.")
+
+        per_point_lists = [self.delays, self.measured_values]
+        ions = getattr(self, "ions_per_frame", None)
+        if isinstance(ions, list) and len(ions) == n:
+            per_point_lists.append(ions)
+
+        for lst in per_point_lists:
+            lst[:] = [x for x, k in zip(lst, keep) if k]
+
+        return self
+
 @dataclass
 class IonData:
     id: int
